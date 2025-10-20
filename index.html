@@ -171,6 +171,10 @@
             <input id="wd-cvv" class="fake-input" placeholder="CVV">
           </div>
         </div>
+        <div style="margin-top:8px">
+          <label class="muted">Сумма вывода: <input id="wd-amount" type="number" min="1" value="100" style="background:transparent;border:1px solid rgba(255,255,255,0.06);padding:6px;border-radius:6px;color:var(--muted);width:120px"></label>
+          <div id="wd-display" class="small" style="margin-top:6px">Сумма к выводу: 100 ₸</div>
+        </div>
         <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
           <button id="wd-cancel">Отмена</button>
           <button id="wd-confirm">Подтвердить</button>
@@ -188,7 +192,31 @@ function $(id){return document.getElementById(id);} // must be first so other in
 // ---------------- Navigation ----------------
 const pages = document.querySelectorAll('.page');
 const navBtns = document.querySelectorAll('.nav-btn');
-function go(pageId){ pages.forEach(p=>p.classList.toggle('active', p.id===pageId)); navBtns.forEach(b=>b.classList.toggle('active', b.dataset.page===pageId)); window.location.hash = pageId; }
+// centralized outcome: returns true for win with given probability (0..1)
+function playOutcome(prob){ return secureRandom() < prob; }
+
+const GLOBAL_WIN_PROB = 0.30; // 30% chance to win by default
+
+function go(pageId){
+  pages.forEach(p=>p.classList.toggle('active', p.id===pageId));
+  navBtns.forEach(b=>b.classList.toggle('active', b.dataset.page===pageId));
+  window.location.hash = pageId;
+  // when switching pages, re-fit canvases / re-init games so they render correctly
+  if(pageId === 'aviator'){
+    fitAvi();
+  }
+  if(pageId === 'plinko'){
+    fitPlinko();
+    setupPlinko();
+  }
+  if(pageId === 'balloon'){
+    // redraw balloon in case canvas size changed
+    drawBalloon();
+  }
+  if(pageId === 'mines'){
+    initMines();
+  }
+}
 navBtns.forEach(b=>b.addEventListener('click', ()=>go(b.dataset.page)));
 // init from hash
 if(location.hash){ const h = location.hash.replace('#',''); if(document.getElementById(h)) go(h); }
@@ -219,13 +247,23 @@ class Smoke{ constructor(x,y){ this.x=x; this.y=y; this.life=1; this.size=8+Math
 let particles=[]; function drawAviBackground(ctx){ const w=aviCanvas.clientWidth; const h=aviCanvas.clientHeight; const t=(performance.now()/3000)%1; const grd=ctx.createLinearGradient(0,0,0,h); grd.addColorStop(0,`rgba(10,6,30,${0.8+0.05*Math.sin(t*6)})`); grd.addColorStop(0.5,`rgba(15,10,40,0.6)`); grd.addColorStop(1,`rgba(4,10,30,1)`); ctx.fillStyle=grd; ctx.fillRect(0,0,w,h); ctx.save(); ctx.globalAlpha=0.12; for(let i=0;i<6;i++){ const y=(i*70+(t*140))%(h+80)-40; ctx.fillStyle=`rgba(124,77,255,${0.05+i*0.02})`; ctx.fillRect(0,y,w,6);} ctx.restore(); }
 function drawPlane(ctx,x,y,angle,stopped){ ctx.save(); ctx.translate(x,y); ctx.rotate(angle); ctx.scale(1,1); if(stopped){ ctx.shadowColor='rgba(124,77,255,0.8)'; ctx.shadowBlur=22;} ctx.fillStyle='rgba(124,77,255,1)'; ctx.beginPath(); ctx.moveTo(-40,0); ctx.quadraticCurveTo(-10,-18,40,0); ctx.quadraticCurveTo(-10,18,-40,0); ctx.fill(); ctx.fillStyle='rgba(0,229,255,0.95)'; ctx.beginPath(); ctx.moveTo(-40,0); ctx.lineTo(-60,-8); ctx.lineTo(-60,8); ctx.closePath(); ctx.fill(); ctx.fillStyle='rgba(6,8,20,0.95)'; ctx.beginPath(); ctx.ellipse(10,-3,8,5,0,0,Math.PI*2); ctx.fill(); ctx.restore(); }
 let lastFrame = performance.now(); function aviLoop(now){ const dt = (now-lastFrame)/1000; lastFrame=now; if(avi.running) avi.mult=growthStep(avi.mult,dt); drawAviBackground(aviCtx); const logNow=Math.log(Math.max(1,avi.mult)); const logDisplayMax=Math.log(Math.max(visualMappingMultiplier,1.000001)); let progress=Math.min(1,logNow/logDisplayMax); const pad=80; const w=aviCanvas.clientWidth; let x=pad+progress*(w-pad*2); if(x>w-pad) x=w-pad; const y=aviCanvas.clientHeight*0.45-Math.sin(progress*Math.PI*2)*16; if(avi.running||avi.stoppedAtEdge){ if(Math.random()<0.65) particles.push(new Smoke(x-20,y+6)); } for(let i=particles.length-1;i>=0;i--){ particles[i].update(dt); if(particles[i].life<=0) particles.splice(i,1);} for(const p of particles) p.draw(aviCtx); const atEdge=(x>=(w-pad-1)); if(atEdge && !avi.stoppedAtEdge){ avi.stoppedAtEdge=true; } drawPlane(aviCtx,x,y,Math.min(0.25,progress*0.35),avi.stoppedAtEdge); aviCtx.fillStyle='#bcdcff'; aviCtx.font='14px monospace'; aviCtx.fillText('×'+avi.mult.toFixed(2),12,20); if(avi.running && Math.random()<0.02) playTick(); if(avi.running && avi.mult>=avi.crashPoint){ avi.running=false; $('avi-cash').disabled=true; $('avi-start').disabled=false; logAvi(`💥 Краш на ${avi.crashPoint.toFixed(2)}x — ставка ${avi.bet} → проигрыш`); playCrash(); flashCrash(x,y);} if(avi.running) requestAnimationFrame(aviLoop);} function flashCrash(cx,cy){ const orig=aviCanvas.style.boxShadow; aviCanvas.style.boxShadow='0 0 120px rgba(255,60,60,0.9)'; setTimeout(()=>aviCanvas.style.boxShadow=orig,700); for(let i=0;i<60;i++){ const p=new Smoke(cx,cy); p.vx=-6+Math.random()*12; p.vy=-6+Math.random()*6; p.size=6+Math.random()*12; p.life=1; particles.push(p);} }
-function startAvi(){ if(avi.running) return; const bet=parseFloat($('avi-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} avi.bet=bet; changeBalance(-bet); avi.crashPoint=genCrashPoint(); avi.mult=1.00; avi.startTime=performance.now(); avi.running=true; avi.stoppedAtEdge=false; $('avi-start').disabled=true; $('avi-cash').disabled=false; playStart(); lastFrame=performance.now(); requestAnimationFrame(aviLoop); logAvi(`▶ Старт: ставка ${bet} — (target hidden)`);} function cashoutAvi(){ if(!avi.running) return; avi.running=false; const won=+(avi.bet*avi.mult).toFixed(2); changeBalance(won); $('avi-cash').disabled=true; $('avi-start').disabled=false; logAvi(`✅ Забрал ${avi.mult.toFixed(2)}x — ставка ${avi.bet} → выигрыш ${won}`); playWin(); for(let i=0;i<16;i++){ const p=new Smoke(aviCanvas.clientWidth*0.6,aviCanvas.clientHeight*0.45); p.vx=-2+Math.random()*4; p.vy=-4+Math.random()*2; p.size=6+Math.random()*6; p.life=1; particles.push(p);} }
+function startAvi(){ if(avi.running) return; const bet=parseFloat($('avi-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} avi.bet=bet; changeBalance(-bet); avi.crashPoint=genCrashPoint(); avi.mult=1.00; avi.startTime=performance.now(); avi.running=true; avi.stoppedAtEdge=false; $('avi-start').disabled=true; $('avi-cash').disabled=false; playStart(); lastFrame=performance.now(); requestAnimationFrame(aviLoop); logAvi(`▶ Старт: ставка ${bet} — (target hidden)`);} 
+function cashoutAvi(){ if(!avi.running) return; avi.running=false; const won=+(avi.bet*avi.mult).toFixed(2); changeBalance(won); $('avi-cash').disabled=true; $('avi-start').disabled=false; logAvi(`✅ Забрал ${avi.mult.toFixed(2)}x — ставка ${avi.bet} → выигрыш ${won}`); playWin(); for(let i=0;i<16;i++){ const p=new Smoke(aviCanvas.clientWidth*0.6,aviCanvas.clientHeight*0.45); p.vx=-2+Math.random()*4; p.vy=-4+Math.random()*2; p.size=6+Math.random()*6; p.life=1; particles.push(p);} }
 function logAvi(text){ const el=document.createElement('div'); el.textContent='['+new Date().toLocaleTimeString()+'] '+text; aviHistory.prepend(el); if(aviHistory.childElementCount>80) aviHistory.removeChild(aviHistory.lastChild); $('aviator-mult').textContent=avi.mult.toFixed(2)+'x'; }
-$('avi-start').addEventListener('click', startAvi); $('avi-cash').addEventListener('click', cashoutAvi);
+$('avi-cash').addEventListener('click', cashoutAvi);
+
+// wrap start to enforce GLOBAL_WIN_PROB for fairness across games
+function startAviWrapped(){ if(avi.running) return; const willWin = playOutcome(GLOBAL_WIN_PROB); startAvi(); // now adjust crash point based on desired outcome
+  if(willWin){ avi.crashPoint = Math.max(avi.crashPoint, 3 + secureRandom()*8); // give room to cashout
+  } else { avi.crashPoint = 1.03 + secureRandom()*0.9; // likely crash early
+  }
+}
+$('avi-start').addEventListener('click', startAviWrapped);
 
 // ---------------- Mines (page separated) ----------------
 let minesGame={running:false,size:36,mines:5,bet:0,safeOpened:0,mult:1,grid:[],mineMap:[]}; const minesGridEl=$('minesGrid'); function setMinesControls(running){ $('min-start').disabled=running; $('min-cash').disabled=!running; } function createMines(){ const size=parseInt($('min-size').value,10); minesGame.size=size; const side=Math.round(Math.sqrt(size)); const minesCount=parseInt($('min-mines').value,10); minesGame.mines=minesCount; minesGridEl.style.gridTemplateColumns=`repeat(${side},44px)`; minesGridEl.innerHTML=''; minesGame.grid=[]; minesGame.mineMap=Array(size).fill(false); let placed=0; while(placed<minesCount){ const idx=Math.floor(secureRandom()*size); if(!minesGame.mineMap[idx]){ minesGame.mineMap[idx]=true; placed++; }} for(let i=0;i<size;i++){ const cell=document.createElement('div'); cell.className='cell'; cell.dataset.idx=i; cell.addEventListener('click',()=>onCellClick(cell,i)); minesGridEl.appendChild(cell); minesGame.grid.push(cell);} $('min-state').textContent='игра идет'; minesGame.running=true; minesGame.safeOpened=0; minesGame.mult=1.00; $('min-mult').textContent=minesGame.mult.toFixed(2)+'x'; setMinesControls(true);} function startMines(){ const bet=parseFloat($('min-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} changeBalance(-bet); minesGame.bet=bet; createMines(); playStart(); } function onCellClick(el,idx){ if(!minesGame.running||el.classList.contains('revealed')) return; el.classList.add('revealed'); if(minesGame.mineMap[idx]){ el.textContent='💣'; minesGame.running=false; $('min-state').textContent='взорвался'; setMinesControls(false); playCrash(); minesGame.grid.forEach((c,i)=>{ if(minesGame.mineMap[i]) c.textContent='💣'; }); } else { el.textContent='✓'; minesGame.safeOpened++; const safeTotal=minesGame.size-minesGame.mines; minesGame.mult=1+(minesGame.safeOpened/safeTotal)*6; $('min-mult').textContent=minesGame.mult.toFixed(2)+'x'; playTick(); }} function cashoutMines(){ if(!minesGame.running) return; minesGame.running=false; const won=+(minesGame.bet*minesGame.mult).toFixed(2); changeBalance(won); $('min-state').textContent='забрал'; setMinesControls(false); minesGame.grid.forEach((c,i)=>{ c.classList.add('revealed'); if(minesGame.mineMap[i]) c.textContent='💣'; if(!minesGame.mineMap[i]&&!c.textContent) c.textContent='✓'; }); playWin(); } $('min-start').addEventListener('click',startMines); $('min-cash').addEventListener('click',cashoutMines);
-(function initMines(){ const size=parseInt($('min-size').value,10); const side=Math.round(Math.sqrt(size)); minesGridEl.style.gridTemplateColumns=`repeat(${side},44px)`; minesGridEl.innerHTML=''; for(let i=0;i<size;i++){ const cell=document.createElement('div'); cell.className='cell'; cell.textContent=''; minesGridEl.appendChild(cell);} setMinesControls(false); })();
+function initMines(){ const size=parseInt($('min-size').value,10); const side=Math.round(Math.sqrt(size)); minesGridEl.style.gridTemplateColumns=`repeat(${side},44px)`; minesGridEl.innerHTML=''; for(let i=0;i<size;i++){ const cell=document.createElement('div'); cell.className='cell'; cell.textContent=''; minesGridEl.appendChild(cell);} setMinesControls(false); }
+initMines();
 
 // ---------------- Plinko (simple physics-ish) ----------------
 const plinkoCanvas = $('plinkoCanvas'); const pCtx = plinkoCanvas.getContext('2d'); function fitPlinko(){ plinkoCanvas.style.height='420px'; plinkoCanvas.style.width='100%'; const ratio=window.devicePixelRatio||1; plinkoCanvas.width=Math.floor(plinkoCanvas.clientWidth*ratio); plinkoCanvas.height=Math.floor(plinkoCanvas.clientHeight*ratio); pCtx.setTransform(ratio,0,0,ratio,0,0); } fitPlinko(); window.addEventListener('resize', ()=>fitPlinko());
@@ -240,31 +278,85 @@ function drawPlinko(){ pCtx.clearRect(0,0,plinkoCanvas.clientWidth,plinkoCanvas.
   // ball
   if(plinko.dropping){ pCtx.fillStyle='rgba(255,200,90,0.95)'; pCtx.beginPath(); pCtx.arc(plinko.ball.x, plinko.ball.y, 10,0,Math.PI*2); pCtx.fill(); }
 }
-function dropPlinko(){ if(plinko.dropping) return; const bet=parseFloat($('plinko-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} changeBalance(-bet); plinko.dropping=true; plinko.ball.x = plinkoCanvas.clientWidth/2; plinko.ball.y = 20; plinko.ball.vx = (secureRandom()-0.5)*4; plinko.ball.vy = 0; animatePlinko(); playStart(); }
+function dropPlinko(){ if(plinko.dropping) return; const bet=parseFloat($('plinko-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} changeBalance(-bet); plinko.dropping=true; plinko.ball.x = plinkoCanvas.clientWidth/2; plinko.ball.y = 20; plinko.ball.vx = (secureRandom()-0.5)*4; plinko.ball.vy = 0; // decide outcome ahead of time to target slot
+  plinko._willWin = playOutcome(GLOBAL_WIN_PROB);
+  // when losing, pick a low multiplier (left slots), when winning, pick a higher multiplier (right slots)
+  if(plinko._willWin){ plinko._targetSlot = Math.min(plinko.slots-1, Math.floor(secureRandom()*(plinko.slots-2))+2); } else { plinko._targetSlot = Math.floor(secureRandom()*2); }
+  animatePlinko(); playStart(); }
 function animatePlinko(){ const gravity = 0.3; function step(){ if(!plinko.dropping) return; plinko.ball.vy += gravity; plinko.ball.x += plinko.ball.vx; plinko.ball.y += plinko.ball.vy; // collisions with pegs
   for(const peg of plinko.pegs){ const dx = plinko.ball.x-peg.x; const dy = plinko.ball.y-peg.y; const dist = Math.sqrt(dx*dx+dy*dy); if(dist < 16){ plinko.ball.vx += (dx/dist)*2; plinko.ball.vy += (dy/dist)*2; } }
   // boundaries
   if(plinko.ball.x < 20) plinko.ball.x = 20, plinko.ball.vx *= -0.6; if(plinko.ball.x > plinkoCanvas.clientWidth-20) plinko.ball.x = plinkoCanvas.clientWidth-20, plinko.ball.vx *= -0.6;
   if(plinko.ball.y > plinkoCanvas.clientHeight-60){ // landed
-    plinko.dropping=false; const slotW = (plinkoCanvas.clientWidth-80)/plinko.slots; const idx = Math.min(plinko.slots-1, Math.floor((plinko.ball.x-40)/slotW)); // multiplier by slot position
-    const mult = 1 + idx*0.8; const bet = parseFloat($('plinko-bet').value); const won = +(bet*mult).toFixed(2); changeBalance(won); playWin(); alert('Вы попали в слот '+(idx+1)+', множитель '+mult.toFixed(2)+'x — выигрыш '+won+' ₸'); drawPlinko(); return; }
+    plinko.dropping=false; const slotW = (plinkoCanvas.clientWidth-80)/plinko.slots; let idx = Math.min(plinko.slots-1, Math.floor((plinko.ball.x-40)/slotW));
+    // if a targetSlot was set, nudge the final idx towards it (visual still random)
+    if(typeof plinko._targetSlot === 'number'){
+      // small chance to deviate, but bias towards target
+      if(idx !== plinko._targetSlot){ // nudge ball visually to target slot area
+        const targetCenter = 40 + plinko._targetSlot*slotW + slotW/2;
+        plinko.ball.x = targetCenter + (secureRandom()-0.5)*slotW*0.4;
+        idx = plinko._targetSlot;
+      }
+    }
+    const mult = 1 + idx*0.8; const bet = parseFloat($('plinko-bet').value); const won = +(bet*mult).toFixed(2);
+    // if losing and _willWin=false, treat small slots as loss (won may be smaller than bet)
+    changeBalance(won);
+    if(plinko._willWin){ playWin(); alert('Вы попали в слот '+(idx+1)+', множитель '+mult.toFixed(2)+'x — выигрыш '+won+' ₸'); }
+    else { playCrash(); alert('Вы попали в слот '+(idx+1)+', множитель '+mult.toFixed(2)+'x — результат: проигрыш/малый выигрыш '+won+' ₸'); }
+    drawPlinko(); return; }
   drawPlinko(); requestAnimationFrame(step); } requestAnimationFrame(step); }
 $('plinko-drop').addEventListener('click', ()=>{ dropPlinko(); }); setupPlinko();
 
 // ---------------- Balloon ----------------
 const ballCanvas = $('balloonCanvas'); const bCtx = ballCanvas.getContext('2d'); let balloon = {running:false,pressure:0,burstAt:0,bet:0}; function drawBalloon(){ bCtx.clearRect(0,0,ballCanvas.width,ballCanvas.height); bCtx.fillStyle='rgba(10,10,30,0.6)'; bCtx.fillRect(0,0,ballCanvas.width,ballCanvas.height); // center
   const cx = ballCanvas.width/2; const cy = ballCanvas.height*0.6; const r = 20 + balloon.pressure*18; bCtx.beginPath(); bCtx.fillStyle='rgba(255,80,140,0.95)'; bCtx.ellipse(cx,cy,Math.abs(r), r, 0,0,Math.PI*2); bCtx.fill(); bCtx.fillStyle='#fff'; bCtx.font='16px monospace'; bCtx.fillText('x'+(1+balloon.pressure*3).toFixed(2), cx-20, 40); }
-function startBalloon(){ if(balloon.running) return; const bet=parseFloat($('ball-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} balloon.bet=bet; changeBalance(-bet); balloon.running=true; balloon.pressure=0; balloon.burstAt = 0.5 + secureRandom()*5; $('ball-start').disabled=true; $('ball-pump').disabled=false; $('ball-cash').disabled=false; playStart(); drawBalloon(); }
+function startBalloon(){ if(balloon.running) return; const bet=parseFloat($('ball-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} balloon.bet=bet; changeBalance(-bet); balloon.running=true; balloon.pressure=0; // decide win/loss ahead
+  balloon._willWin = playOutcome(GLOBAL_WIN_PROB);
+  if(balloon._willWin){ balloon.burstAt = 3 + secureRandom()*5; } else { balloon.burstAt = 0.5 + secureRandom()*2.2; }
+  $('ball-start').disabled=true; $('ball-pump').disabled=false; $('ball-cash').disabled=false; playStart(); drawBalloon(); }
 function pumpBalloon(){ if(!balloon.running) return; balloon.pressure += 0.12 + secureRandom()*0.12; drawBalloon(); if(balloon.pressure >= balloon.burstAt){ // burst
-  balloon.running=false; $('ball-start').disabled=false; $('ball-pump').disabled=true; $('ball-cash').disabled=true; playCrash(); alert('Шарик лопнул — ты проиграл'); drawBalloon(); } }
+  balloon.running=false; $('ball-start').disabled=false; $('ball-pump').disabled=true; $('ball-cash').disabled=true; playCrash(); if(balloon._willWin){ // rare: should not happen, but treat as tiny loss
+    alert('Шарик лопнул — результат: маленький выигрыш или ничья');
+  } else {
+    alert('Шарик лопнул — ты проиграл');
+  }
+  drawBalloon(); } }
 function cashoutBalloon(){ if(!balloon.running) return; balloon.running=false; const mult = 1 + balloon.pressure*3; const won = +(balloon.bet * mult).toFixed(2); changeBalance(won); $('ball-start').disabled=false; $('ball-pump').disabled=true; $('ball-cash').disabled=true; playWin(); alert('Забрал '+mult.toFixed(2)+'x — выигрыш '+won+' ₸'); }
 $('ball-start').addEventListener('click', startBalloon); $('ball-pump').addEventListener('click', pumpBalloon); $('ball-cash').addEventListener('click', cashoutBalloon);
+
+// Ensure cashout respects planned outcome
+const origCashoutBalloon = cashoutBalloon;
+function cashoutBalloonWrapped(){ if(!balloon.running) return; if(!balloon._willWin && balloon.pressure<balloon.burstAt){ // if planned loss, force smaller payout
+  const mult = 1 + Math.min(balloon.pressure, 0.8)*3; const won = +(balloon.bet * mult).toFixed(2); balloon.running=false; changeBalance(won); $('ball-start').disabled=false; $('ball-pump').disabled=true; $('ball-cash').disabled=true; playWin(); alert('Забрал '+mult.toFixed(2)+'x — выигрыш '+won+' ₸'); return; }
+  // otherwise normal
+  origCashoutBalloon();
+}
+$('ball-cash').removeEventListener('click', cashoutBalloon);
+$('ball-cash').addEventListener('click', cashoutBalloonWrapped);
 
 // ---------------- Withdraw Page (prank) ----------------
 function updateWithdrawFields(){ const method = document.querySelector('input[name="wmethod"]:checked').value; const container=$('withdrawFields'); if(method==='card'){ container.innerHTML = `<input id="wd-card" class="fake-input" placeholder="Номер карты"><div style="display:flex;gap:8px;margin-top:8px"><input id="wd-exp" class="fake-input" placeholder="MM/YY"><input id="wd-cvv" class="fake-input" placeholder="CVV"></div><div class="small" style="margin-top:8px">Вывод средств занимают 2-3 дня</div>`; } else if(method==='qiwi'){ container.innerHTML = `<input id="wd-qiwi" class="fake-input" placeholder="Номер телефона (7...)"><div class="small" style="margin-top:8px">Вывод средств занимают 2-3 дня</div>`; } else { container.innerHTML = `<input id="wd-addr" class="fake-input" placeholder="Адрес кошелька"><div class="small" style="margin-top:8px">Вывод средств занимают 2-3 дня</div>`; } }
 document.querySelectorAll('input[name="wmethod"]').forEach(r=>r.addEventListener('change', updateWithdrawFields));
 $('wd-cancel').addEventListener('click', ()=>{ go('home'); });
-$('wd-confirm').addEventListener('click', ()=>{ const container=$('withdrawFields'); container.innerHTML = `<div style="padding:12px;border-radius:8px;background:rgba(255,255,255,0.02)">💀 <strong>Спасибо, вы повелись)</strong></div>`; setTimeout(()=>{ go('home'); updateWithdrawFields(); },1400); });
+// update display when amount changes
+const wdAmountEl = $('wd-amount'); const wdDisplay = $('wd-display'); wdAmountEl.addEventListener('input', ()=>{ const v = parseFloat(wdAmountEl.value)||0; wdDisplay.textContent = `Сумма к выводу: ${v.toFixed(2)} ₸`; });
+
+$('wd-confirm').addEventListener('click', ()=>{ const container=$('withdrawFields'); const amount = parseFloat(wdAmountEl.value)||0; container.innerHTML = `<div style="padding:12px;border-radius:8px;background:rgba(255,255,255,0.02)">✅ <strong>Запрос на вывод ${amount.toFixed(2)} ₸ принят</strong><div class="small" style="margin-top:6px">Способ: ${document.querySelector('input[name="wmethod"]:checked').value}</div></div>`; setTimeout(()=>{ go('home'); updateWithdrawFields(); },1400); });
+
+// Wrap mines start to influence outcome per GLOBAL_WIN_PROB
+const origStartMines = startMines;
+function startMinesWrapped(){ // decide whether this round will be a win
+  const willWin = playOutcome(GLOBAL_WIN_PROB);
+  // call original to place mines randomly
+  origStartMines();
+  if(!willWin){ // make early indexes more dangerous
+    for(let i=0;i<Math.min(4,minesGame.mineMap.length);i++) minesGame.mineMap[i]=true;
+  } else { // try to keep first few safe
+    for(let i=0;i<3 && i<minesGame.mineMap.length;i++) minesGame.mineMap[i]=false;
+  }
+}
+$('min-start').removeEventListener('click',startMines);
+$('min-start').addEventListener('click',startMinesWrapped);
 
 </script>
 </body>
