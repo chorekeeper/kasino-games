@@ -189,6 +189,16 @@
 // utils
 function $(id){return document.getElementById(id);} // must be first so other init code can use it
 
+// Global runtime error overlay to help debug issues that stop scripts from running
+(function(){
+  const ol = document.createElement('div'); ol.id='error-overlay';
+  ol.style.position='fixed'; ol.style.left='12px'; ol.style.right='12px'; ol.style.bottom='12px'; ol.style.zIndex=9999;
+  ol.style.maxHeight='40vh'; ol.style.overflow='auto'; ol.style.padding='10px'; ol.style.borderRadius='8px'; ol.style.background='rgba(255,40,40,0.06)'; ol.style.color='#ffdfe0'; ol.style.fontFamily='monospace'; ol.style.display='none'; ol.style.border='1px solid rgba(255,80,80,0.18)'; document.body.appendChild(ol);
+  function showError(msg){ ol.style.display='block'; const d=document.createElement('div'); d.style.marginBottom='6px'; d.textContent=msg; ol.prepend(d); console.error(msg); }
+  window.addEventListener('error', e=>{ try{ showError((e && e.error && e.error.stack) ? e.error.stack : (e.message || String(e))); }catch(err){ console.error(err); } });
+  window.addEventListener('unhandledrejection', e=>{ try{ showError('UnhandledRejection: '+(e.reason && e.reason.stack? e.reason.stack : String(e.reason))); }catch(err){ console.error(err); } });
+})();
+
 // ---------------- Navigation ----------------
 const pages = document.querySelectorAll('.page');
 const navBtns = document.querySelectorAll('.nav-btn');
@@ -203,23 +213,22 @@ function go(pageId){
   window.location.hash = pageId;
   // when switching pages, re-fit canvases / re-init games so they render correctly
   if(pageId === 'aviator'){
-    fitAvi();
+    setTimeout(()=>{ try{ fitAvi(); }catch(e){ console.error('fitAvi deferred error',e); } },0);
   }
   if(pageId === 'plinko'){
-    fitPlinko();
-    setupPlinko();
+    setTimeout(()=>{ try{ fitPlinko(); setupPlinko(); }catch(e){ console.error('plinko deferred error',e); } },0);
   }
   if(pageId === 'balloon'){
-    // redraw balloon in case canvas size changed
-    drawBalloon();
+    // redraw balloon in case canvas size changed (deferred to ensure canvas/context exists)
+    setTimeout(()=>{ try{ drawBalloon(); }catch(e){ console.error('drawBalloon deferred error',e); } },0);
   }
   if(pageId === 'mines'){
-    initMines();
+    setTimeout(()=>{ try{ initMines(); }catch(e){ console.error('initMines deferred error',e); } },0);
   }
 }
 navBtns.forEach(b=>b.addEventListener('click', ()=>go(b.dataset.page)));
 // init from hash
-if(location.hash){ const h = location.hash.replace('#',''); if(document.getElementById(h)) go(h); }
+if(location.hash){ const h = location.hash.replace('#',''); if(document.getElementById(h)) setTimeout(()=>go(h),0); }
 
 // ---------------- Balance ----------------
 const balanceEl = $('balance'); let balance = parseFloat(localStorage.getItem('mini_balance') || '1000'); function setBalance(){ balanceEl.textContent = balance.toFixed(2); }
@@ -236,7 +245,7 @@ function playWin(){ beep(920,0.06,0.16); setTimeout(()=>beep(1160,0.06,0.12),80)
 
 // ---------------- Aviator (reuse realistic engine) ----------------
 const aviCanvas = $('aviCanvas'); const aviCtx = aviCanvas.getContext('2d'); function resizeCanvas(c){ const ratio = window.devicePixelRatio||1; c.width = Math.floor(c.clientWidth*ratio); c.height = Math.floor(c.clientHeight*ratio); const ctx = c.getContext('2d'); ctx.setTransform(ratio,0,0,ratio,0,0); }
-window.addEventListener('resize', ()=>resizeCanvas(aviCanvas)); function fitAvi(){ aviCanvas.style.height='260px'; aviCanvas.style.width='100%'; resizeCanvas(aviCanvas); } fitAvi();
+window.addEventListener('resize', ()=>resizeCanvas(aviCanvas)); function fitAvi(){ aviCanvas.style.height='260px'; aviCanvas.style.width='100%'; resizeCanvas(aviCanvas); } fitAvi(); console.log('fitAvi initialized');
 const visualMappingMultiplier = 20;
 let avi = {running:false,mult:1,crashPoint:1,bet:0,startTime:0,stoppedAtEdge:false};
 const aviHistory = $('avi-history');
@@ -263,7 +272,7 @@ $('avi-start').addEventListener('click', startAviWrapped);
 // ---------------- Mines (page separated) ----------------
 let minesGame={running:false,size:36,mines:5,bet:0,safeOpened:0,mult:1,grid:[],mineMap:[]}; const minesGridEl=$('minesGrid'); function setMinesControls(running){ $('min-start').disabled=running; $('min-cash').disabled=!running; } function createMines(){ const size=parseInt($('min-size').value,10); minesGame.size=size; const side=Math.round(Math.sqrt(size)); const minesCount=parseInt($('min-mines').value,10); minesGame.mines=minesCount; minesGridEl.style.gridTemplateColumns=`repeat(${side},44px)`; minesGridEl.innerHTML=''; minesGame.grid=[]; minesGame.mineMap=Array(size).fill(false); let placed=0; while(placed<minesCount){ const idx=Math.floor(secureRandom()*size); if(!minesGame.mineMap[idx]){ minesGame.mineMap[idx]=true; placed++; }} for(let i=0;i<size;i++){ const cell=document.createElement('div'); cell.className='cell'; cell.dataset.idx=i; cell.addEventListener('click',()=>onCellClick(cell,i)); minesGridEl.appendChild(cell); minesGame.grid.push(cell);} $('min-state').textContent='игра идет'; minesGame.running=true; minesGame.safeOpened=0; minesGame.mult=1.00; $('min-mult').textContent=minesGame.mult.toFixed(2)+'x'; setMinesControls(true);} function startMines(){ const bet=parseFloat($('min-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} changeBalance(-bet); minesGame.bet=bet; createMines(); playStart(); } function onCellClick(el,idx){ if(!minesGame.running||el.classList.contains('revealed')) return; el.classList.add('revealed'); if(minesGame.mineMap[idx]){ el.textContent='💣'; minesGame.running=false; $('min-state').textContent='взорвался'; setMinesControls(false); playCrash(); minesGame.grid.forEach((c,i)=>{ if(minesGame.mineMap[i]) c.textContent='💣'; }); } else { el.textContent='✓'; minesGame.safeOpened++; const safeTotal=minesGame.size-minesGame.mines; minesGame.mult=1+(minesGame.safeOpened/safeTotal)*6; $('min-mult').textContent=minesGame.mult.toFixed(2)+'x'; playTick(); }} function cashoutMines(){ if(!minesGame.running) return; minesGame.running=false; const won=+(minesGame.bet*minesGame.mult).toFixed(2); changeBalance(won); $('min-state').textContent='забрал'; setMinesControls(false); minesGame.grid.forEach((c,i)=>{ c.classList.add('revealed'); if(minesGame.mineMap[i]) c.textContent='💣'; if(!minesGame.mineMap[i]&&!c.textContent) c.textContent='✓'; }); playWin(); } $('min-start').addEventListener('click',startMines); $('min-cash').addEventListener('click',cashoutMines);
 function initMines(){ const size=parseInt($('min-size').value,10); const side=Math.round(Math.sqrt(size)); minesGridEl.style.gridTemplateColumns=`repeat(${side},44px)`; minesGridEl.innerHTML=''; for(let i=0;i<size;i++){ const cell=document.createElement('div'); cell.className='cell'; cell.textContent=''; minesGridEl.appendChild(cell);} setMinesControls(false); }
-initMines();
+initMines(); console.log('initMines initialized');
 
 // ---------------- Plinko (simple physics-ish) ----------------
 const plinkoCanvas = $('plinkoCanvas'); const pCtx = plinkoCanvas.getContext('2d');
@@ -283,7 +292,11 @@ function fitPlinko(){
   pCtx.setTransform(ratio,0,0,ratio,0,0);
 }
 fitPlinko(); window.addEventListener('resize', ()=>{ fitPlinko(); setupPlinko(); });
-let plinko = {dropping:false,ball:{x:0,y:0,vx:0,vy:0},pegs:[],slots:8};
+console.log('fitPlinko called');
+// exact 17-slot multipliers used by Plinko
+const DEFAULT_PLINKO_MULTIPLIERS = [1000,100,28,9,4,2,0.2,0.2,0.2,0.2,0.2,2,4,9,28,100,1000];
+// plinko state: supports multiple simultaneous balls
+let plinko = { pegs:[], slots: DEFAULT_PLINKO_MULTIPLIERS.length, multipliers: DEFAULT_PLINKO_MULTIPLIERS.slice(), balls: [], nextBallId: 1 };
 function setupPlinko(){
   plinko.pegs = [];
   const cols = 9; const rows = 7;
@@ -389,11 +402,19 @@ function animatePlinko(){
   }
   requestAnimationFrame(step);
 }
-$('plinko-drop').addEventListener('click', ()=>{ dropPlinko(); }); setupPlinko();
+$('plinko-drop').addEventListener('click', ()=>{ dropPlinko(); }); setupPlinko(); console.log('setupPlinko completed');
 
 // ---------------- Balloon ----------------
-const ballCanvas = $('balloonCanvas'); const bCtx = ballCanvas.getContext('2d'); let balloon = {running:false,pressure:0,burstAt:0,bet:0}; function drawBalloon(){ bCtx.clearRect(0,0,ballCanvas.width,ballCanvas.height); bCtx.fillStyle='rgba(10,10,30,0.6)'; bCtx.fillRect(0,0,ballCanvas.width,ballCanvas.height); // center
-  const cx = ballCanvas.width/2; const cy = ballCanvas.height*0.6; const r = 20 + balloon.pressure*18; bCtx.beginPath(); bCtx.fillStyle='rgba(255,80,140,0.95)'; bCtx.ellipse(cx,cy,Math.abs(r), r, 0,0,Math.PI*2); bCtx.fill(); bCtx.fillStyle='#fff'; bCtx.font='16px monospace'; bCtx.fillText('x'+(1+balloon.pressure*3).toFixed(2), cx-20, 40); }
+const ballCanvas = $('balloonCanvas'); const bCtx = (ballCanvas && ballCanvas.getContext) ? ballCanvas.getContext('2d') : null; let balloon = {running:false,pressure:0,burstAt:0,bet:0};
+function drawBalloon(){
+  const canvas = $('balloonCanvas'); if(!canvas) return; const ctx = (canvas.getContext) ? canvas.getContext('2d') : null; if(!ctx) return;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle='rgba(10,10,30,0.6)'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  // center
+  const cx = canvas.width/2; const cy = canvas.height*0.6; const r = 20 + balloon.pressure*18;
+  ctx.beginPath(); ctx.fillStyle='rgba(255,80,140,0.95)'; ctx.ellipse(cx,cy,Math.abs(r), r, 0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='16px monospace'; ctx.fillText('x'+(1+balloon.pressure*3).toFixed(2), cx-20, 40);
+}
 function startBalloon(){ if(balloon.running) return; const bet=parseFloat($('ball-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} balloon.bet=bet; changeBalance(-bet); balloon.running=true; balloon.pressure=0; // decide win/loss ahead
   balloon._willWin = playOutcome(GLOBAL_WIN_PROB);
   if(balloon._willWin){ balloon.burstAt = 3 + secureRandom()*5; } else { balloon.burstAt = 0.5 + secureRandom()*2.2; }
