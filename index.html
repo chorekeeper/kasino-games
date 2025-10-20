@@ -284,11 +284,29 @@ function fitPlinko(){
 }
 fitPlinko(); window.addEventListener('resize', ()=>{ fitPlinko(); setupPlinko(); });
 let plinko = {dropping:false,ball:{x:0,y:0,vx:0,vy:0},pegs:[],slots:8};
-function setupPlinko(){ plinko.pegs = []; const cols = 9; const rows = 7; const w = plinkoCanvas.clientWidth; const h = plinkoCanvas.clientHeight; for(let r=0;r<rows;r++){ for(let c=0;c<cols;c++){ const offset = (r%2)*25; const x = 40 + c*( (w-80)/(cols-1) ) + offset; const y = 60 + r*45; plinko.pegs.push({x,y}); } } plinko.slots = 8; drawPlinko(); }
-function drawPlinko(){ pCtx.clearRect(0,0,plinkoCanvas.clientWidth,plinkoCanvas.clientHeight); // background
+function setupPlinko(){
+  plinko.pegs = [];
+  const cols = 9; const rows = 7;
+  const w = plinkoCanvas.clientWidth; const h = plinkoCanvas.clientHeight;
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      const offset = (r%2)*25;
+      const x = 40 + c*( (w-80)/(cols-1) ) + offset;
+      const y = 60 + r*45;
+      plinko.pegs.push({x,y});
+    }
+  }
+  // ensure slots matches configured multipliers
+  plinko.slots = (plinko.multipliers && plinko.multipliers.length) ? plinko.multipliers.length : DEFAULT_PLINKO_MULTIPLIERS.length;
+  drawPlinko();
+}
+function drawPlinko(){
+  pCtx.clearRect(0,0,plinkoCanvas.clientWidth,plinkoCanvas.clientHeight);
+  // background
   pCtx.fillStyle='rgba(255,255,255,0.03)'; pCtx.fillRect(0,0,plinkoCanvas.clientWidth,plinkoCanvas.clientHeight);
   // pegs
-  pCtx.fillStyle='rgba(124,77,255,0.9)'; for(const peg of plinko.pegs){ pCtx.beginPath(); pCtx.arc(peg.x,peg.y,6,0,Math.PI*2); pCtx.fill(); }
+  pCtx.fillStyle='rgba(124,77,255,0.9)';
+  for(const peg of plinko.pegs){ pCtx.beginPath(); pCtx.arc(peg.x,peg.y,6,0,Math.PI*2); pCtx.fill(); }
   // slots
   const slotW = (plinkoCanvas.clientWidth-80)/plinko.slots;
   // draw slot boxes and visible multipliers above each slot
@@ -297,70 +315,77 @@ function drawPlinko(){ pCtx.clearRect(0,0,plinkoCanvas.clientWidth,plinkoCanvas.
     pCtx.fillStyle='rgba(0,0,0,0.4)'; pCtx.fillRect(40+i*slotW, plinkoCanvas.clientHeight-40, slotW-6, 40);
     // multiplier label
     const mult = (plinko.multipliers && plinko.multipliers[i]) ? plinko.multipliers[i] : (1 + i*0.8);
-    pCtx.fillStyle='rgba(200,200,255,0.9)';
+    pCtx.fillStyle='rgba(200,200,255,0.95)';
     pCtx.textAlign='center';
+    // make labels slightly smaller on narrow screens
+    if(window.innerWidth < 420) pCtx.font = '12px monospace'; else pCtx.font = '14px monospace';
     pCtx.fillText(mult.toFixed(2)+'x', 40+i*slotW+slotW/2, plinkoCanvas.clientHeight-46);
   }
-  // ball
-  if(plinko.dropping){ pCtx.fillStyle='rgba(255,200,90,0.95)'; pCtx.beginPath(); pCtx.arc(plinko.ball.x, plinko.ball.y, 10,0,Math.PI*2); pCtx.fill(); }
+  // balls (support multiple)
+  for(const b of plinko.balls){ if(b.state!=='done'){ pCtx.fillStyle='rgba(255,200,90,0.95)'; pCtx.beginPath(); pCtx.arc(b.x, b.y, 10,0,Math.PI*2); pCtx.fill(); }}
 }
-function dropPlinko(){ if(plinko.dropping) return; const bet=parseFloat($('plinko-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} changeBalance(-bet); plinko.dropping=true; plinko.ball.x = plinkoCanvas.clientWidth/2; plinko.ball.y = 20; plinko.ball.vx = (secureRandom()-0.5)*4; plinko.ball.vy = 0; // decide outcome ahead of time to target slot
-  plinko._willWin = playOutcome(GLOBAL_WIN_PROB);
-  // ensure multipliers array exists
-  if(!plinko.multipliers || plinko.multipliers.length !== plinko.slots){
-    // default mapping (left -> small, right -> big)
-    plinko.multipliers = [];
-    for(let i=0;i<plinko.slots;i++) plinko.multipliers.push(+(1 + i*0.8).toFixed(2));
-  }
-  // choose target slot: if win prefer slots with higher multipliers, if loss prefer lower
-  if(plinko._willWin){
-    // weighted pick by multiplier (favor higher multipliers)
-    const weights = plinko.multipliers.map(m=>m);
-    const sum = weights.reduce((a,b)=>a+b,0);
-    let r = secureRandom()*sum; let sel=0; while(r>weights[sel]){ r-=weights[sel]; sel++; if(sel>=weights.length) sel=weights.length-1; }
-    plinko._targetSlot = sel;
+function dropPlinko(){
+  const bet=parseFloat($('plinko-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} changeBalance(-bet);
+  // create a new ball and determine its planned outcome and target
+  const ball = { id: plinko.nextBallId++, x: plinkoCanvas.clientWidth/2, y: 20, vx: (secureRandom()-0.5)*4, vy:0, bet:bet, state:'falling' };
+  ball._willWin = playOutcome(GLOBAL_WIN_PROB);
+  // ensure multipliers exist
+  if(!plinko.multipliers || plinko.multipliers.length !== DEFAULT_PLINKO_MULTIPLIERS.length){ plinko.multipliers = DEFAULT_PLINKO_MULTIPLIERS.slice(); plinko.slots = plinko.multipliers.length; }
+  if(ball._willWin){
+    const weights = plinko.multipliers.map(m=>m); const sum = weights.reduce((a,b)=>a+b,0);
+    let r = secureRandom()*sum; let sel = 0;
+    while(r > weights[sel]){ r -= weights[sel]; sel++; if(sel >= weights.length) { sel = weights.length-1; break; } }
+    ball._targetSlot = sel;
   } else {
-    // prefer left side (lower multipliers)
-    plinko._targetSlot = Math.floor(secureRandom()*Math.max(1, Math.floor(plinko.slots/3)));
+    const lowStart = 6; const lowCount = 5; const pick = Math.floor(secureRandom()*lowCount); ball._targetSlot = lowStart + pick;
   }
-  animatePlinko(); playStart(); }
-function animatePlinko(){ const gravity = 0.3; function step(){ if(!plinko.dropping) return; plinko.ball.vy += gravity; plinko.ball.x += plinko.ball.vx; plinko.ball.y += plinko.ball.vy; // collisions with pegs
-  for(const peg of plinko.pegs){ const dx = plinko.ball.x-peg.x; const dy = plinko.ball.y-peg.y; const dist = Math.sqrt(dx*dx+dy*dy); if(dist < 16){ plinko.ball.vx += (dx/dist)*2; plinko.ball.vy += (dy/dist)*2; } }
-  // boundaries
-  if(plinko.ball.x < 20) plinko.ball.x = 20, plinko.ball.vx *= -0.6; if(plinko.ball.x > plinkoCanvas.clientWidth-20) plinko.ball.x = plinkoCanvas.clientWidth-20, plinko.ball.vx *= -0.6;
-  if(plinko.ball.y > plinkoCanvas.clientHeight-60){ // landed
-    plinko.dropping=false; const slotW = (plinkoCanvas.clientWidth-80)/plinko.slots; let idx = Math.min(plinko.slots-1, Math.floor((plinko.ball.x-40)/slotW));
-    // smooth final shift: animate x to target center over 300ms before landing
-    if(typeof plinko._targetSlot === 'number'){
-      const targetCenter = 40 + plinko._targetSlot*slotW + slotW/2;
-      // perform a short easing animation for the final horizontal shift
-      const startX = plinko.ball.x;
-      const duration = 300; // ms
-      const startT = performance.now();
-      function finalStep(now){
-        const t = Math.min(1, (now-startT)/duration);
-        // easeOutQuad
-        const ease = 1 - (1-t)*(1-t);
-        plinko.ball.x = startX + (targetCenter - startX)*ease;
-        drawPlinko();
-        if(t<1) requestAnimationFrame(finalStep);
-        else {
-          // land now
-          let idx = plinko._targetSlot;
-          const mult = (plinko.multipliers && plinko.multipliers[idx]) ? plinko.multipliers[idx] : Math.max(1,1+idx*0.8);
-          const bet = parseFloat($('plinko-bet').value);
-          const won = +(bet*mult).toFixed(2);
-          if(plinko._willWin){ changeBalance(won); playWin(); alert('Вы попали в слот '+(idx+1)+', множитель '+mult.toFixed(2)+'x — выигрыш '+won+' ₸'); }
-          else { playCrash(); alert('Вы попали в слот '+(idx+1)+', множитель '+mult.toFixed(2)+'x — проигрыш'); }
-          drawPlinko();
+  plinko.balls.push(ball);
+  // ensure the animation loop is running
+  if(!plinko._animating){ plinko._animating = true; animatePlinko(); }
+  playStart();
+}
+function animatePlinko(){
+  const gravity = 0.3;
+  function step(){
+    // update all falling balls
+    for(const b of plinko.balls){
+      if(b.state==='falling'){
+        b.vy += gravity; b.x += b.vx; b.y += b.vy;
+        // collisions with pegs
+        for(const peg of plinko.pegs){ const dx = b.x-peg.x; const dy = b.y-peg.y; const dist = Math.sqrt(dx*dx+dy*dy); if(dist < 16){ b.vx += (dx/dist)*2; b.vy += (dy/dist)*2; } }
+        // boundaries
+        if(b.x < 20) b.x = 20, b.vx *= -0.6; if(b.x > plinkoCanvas.clientWidth-20) b.x = plinkoCanvas.clientWidth-20, b.vx *= -0.6;
+        // landing
+        if(b.y > plinkoCanvas.clientHeight-60){
+          b.state = 'finalizing';
+          const slotW = (plinkoCanvas.clientWidth-80)/plinko.slots;
+          const targetCenter = 40 + b._targetSlot*slotW + slotW/2;
+          const startX = b.x; const duration = 300; const startT = performance.now();
+          (function(ball,startX,targetCenter,startT,duration){
+            function finalStep(now){
+              const t = Math.min(1, (now-startT)/duration);
+              const ease = 1 - (1-t)*(1-t);
+              ball.x = startX + (targetCenter - startX)*ease;
+              drawPlinko();
+              if(t<1) requestAnimationFrame(finalStep);
+              else {
+                // finalize payout and mark done
+                const idx = ball._targetSlot; const mult = (plinko.multipliers && plinko.multipliers[idx]) ? plinko.multipliers[idx] : Math.max(1,1+idx*0.8);
+                const won = +(ball.bet * mult).toFixed(2);
+                if(ball._willWin){ changeBalance(won); playWin(); alert('Вы попали в слот '+(idx+1)+', множитель '+mult.toFixed(2)+'x — выигрыш '+won+' ₸'); }
+                else { playCrash(); alert('Вы попали в слот '+(idx+1)+', множитель '+mult.toFixed(2)+'x — проигрыш'); }
+                ball.state='done'; drawPlinko();
+              }
+            }
+            requestAnimationFrame(finalStep);
+          })(b,startX,targetCenter,startT,duration);
         }
       }
-      requestAnimationFrame(finalStep);
-      plinko.dropping=false;
-      return;
     }
-    }
-  drawPlinko(); requestAnimationFrame(step);
+    // cleanup done balls
+    plinko.balls = plinko.balls.filter(x=>x.state!=='done');
+    drawPlinko();
+    if(plinko.balls.length>0) requestAnimationFrame(step); else plinko._animating=false;
   }
   requestAnimationFrame(step);
 }
