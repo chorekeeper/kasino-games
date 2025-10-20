@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Мини-казино</title>
+<style>
+  :root{--bg:#040616;--card:#071127;--accent:#7c4dff;--accent2:#00e5ff;--muted:#9aa7c7}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(ellipse at 10% 10%, rgba(124,77,255,0.06), transparent 10%), linear-gradient(180deg,#02040a 0%, #040616 100%);color:#e7f0ff;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;padding:18px}
+  .app{max-width:1200px;margin:0 auto}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  h1{margin:0;font-size:18px}
+  nav{display:flex;gap:8px;align-items:center}
+  .nav-btn{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px 12px;border-radius:10px;color:var(--muted);cursor:pointer}
+  .nav-btn.active{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#071027}
+  .balance{background:linear-gradient(90deg, rgba(124,77,255,0.12), rgba(0,229,255,0.06));padding:10px 14px;border-radius:10px;font-weight:700;display:flex;gap:8px;align-items:center}
+  main{margin-top:18px}
+  .page{display:none}
+  .page.active{display:block}
+  .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border:1px solid rgba(255,255,255,0.03);padding:16px;border-radius:14px}
+  button{background:linear-gradient(90deg,var(--accent),var(--accent2));border:none;color:#071027;padding:8px 12px;border-radius:10px;font-weight:700;cursor:pointer}
+  button[disabled]{opacity:.45;cursor:default}
+  input[type=number], input[type=text], select{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px;border-radius:8px;color:var(--muted)}
+  .muted{color:var(--muted);font-size:13px}
+  /* Canvas styles */
+  #aviCanvas{width:100%;height:260px;border-radius:12px;background:linear-gradient(180deg,#03041a 0%, #07102a 100%);display:block}
+  /* Mines grid */
+  .mines-grid{display:grid;grid-template-columns:repeat(6,44px);gap:8px;justify-content:center}
+  .cell{width:44px;height:44px;border-radius:6px;background:#07162b;display:flex;align-items:center;justify-content:center;cursor:pointer;border:1px solid rgba(255,255,255,0.03);font-weight:800}
+  .cell.revealed{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));cursor:default}
+  /* plinko */
+  #plinkoCanvas{width:100%;height:420px;border-radius:12px;background:#061028}
+  /* balloon */
+  .balloon-area{height:300px;display:flex;align-items:center;justify-content:center}
+  /* modal */
+  .modal-back{position:fixed;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:50}
+  .modal{background:linear-gradient(180deg,#061028,#071127);padding:18px;border-radius:12px;width:380px;border:1px solid rgba(255,255,255,0.04)}
+  .small{font-size:12px;color:var(--muted)}
+  footer{margin-top:18px;text-align:center;color:#8fa3cc}
+  @media(max-width:980px){.app{padding:12px}.nav-btn{padding:6px 8px}}
+</style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div style="display:flex;gap:12px;align-items:center">
+        <h1>Мини-казино</h1>
+        <nav id="nav">
+          <button class="nav-btn active" data-page="home">Home</button>
+          <button class="nav-btn" data-page="aviator">Aviator</button>
+          <button class="nav-btn" data-page="mines">Mines</button>
+          <button class="nav-btn" data-page="plinko">Plinko</button>
+          <button class="nav-btn" data-page="balloon">Balloon</button>
+          <button class="nav-btn" data-page="withdraw">Вывод</button>
+        </nav>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div class="balance card">Баланс: <span id="balance">1000.00</span> ₸</div>
+      </div>
+    </header>
+
+    <main>
+      <!-- Home -->
+      <section id="home" class="page active card">
+        <h2>Главное меню</h2>
+        <p class="muted">Выбери игру — каждая работает отдельно, баланс общий.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+          <button onclick="go('aviator')">Играть Aviator</button>
+          <button onclick="go('mines')">Играть Mines</button>
+          <button onclick="go('plinko')">Играть Plinko</button>
+          <button onclick="go('balloon')">Играть Balloon</button>
+        </div>
+      </section>
+
+      <!-- Aviator Page -->
+      <section id="aviator" class="page card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div class="muted">Aviator — реалистичный рост множителя</div>
+            <div id="aviator-mult" style="font-size:28px;font-weight:900;color:var(--accent2);margin-top:6px">1.00x</div>
+          </div>
+          <div>
+            <input id="avi-bet" type="number" min="1" step="1" value="50">
+            <button id="avi-start">Играть</button>
+            <button id="avi-cash" disabled>Забрать</button>
+          </div>
+        </div>
+        <canvas id="aviCanvas"></canvas>
+        <div class="muted" style="margin-top:8px">История раундов:</div>
+        <div id="avi-history" class="history" style="max-height:120px;overflow:auto;margin-top:6px"></div>
+      </section>
+
+      <!-- Mines Page -->
+      <section id="mines" class="page card">
+        <h2>Mines</h2>
+        <div style="display:flex;gap:18px;align-items:flex-start">
+          <div style="flex:1;min-width:260px">
+            <div class="muted">Параметры</div>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <input id="min-bet" type="number" min="1" value="20">
+              <select id="min-size">
+                <option value="36">6x6</option>
+                <option value="16">4x4</option>
+                <option value="49">7x7</option>
+              </select>
+              <select id="min-mines">
+                <option value="3">3 мины</option>
+                <option value="5" selected>5 мин</option>
+                <option value="8">8 мин</option>
+              </select>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <button id="min-start">Новая игра</button>
+              <button id="min-cash" disabled>Забрать</button>
+            </div>
+            <div style="margin-top:10px">Статус: <span id="min-state">не начата</span></div>
+            <div style="margin-top:6px">Множитель: <strong id="min-mult">1.00x</strong></div>
+          </div>
+          <div style="width:300px">
+            <div class="muted">Поле:</div>
+            <div style="margin-top:10px"><div class="mines-grid" id="minesGrid"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Plinko Page -->
+      <section id="plinko" class="page card">
+        <h2>Plinko</h2>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div class="muted">Ставка</div>
+            <input id="plinko-bet" type="number" min="1" value="20">
+          </div>
+          <div>
+            <button id="plinko-drop">Опустить шар</button>
+          </div>
+        </div>
+        <canvas id="plinkoCanvas"></canvas>
+        <div style="margin-top:10px" class="muted">Выходы дают разные множители (слева меньше, справа больше).</div>
+      </section>
+
+      <!-- Balloon Page -->
+      <section id="balloon" class="page card">
+        <h2>Balloon</h2>
+        <div style="display:flex;gap:12px;align-items:center">
+          <div>
+            <input id="ball-bet" type="number" min="1" value="20">
+            <button id="ball-start">Старт</button>
+            <button id="ball-pump" disabled>Надуть</button>
+            <button id="ball-cash" disabled>Забрать</button>
+          </div>
+          <div class="balloon-area"><canvas id="balloonCanvas" width="400" height="260" style="background:transparent"></canvas></div>
+        </div>
+        <div class="muted" style="margin-top:8px">Надувай шар — множитель растёт. Если шар лопнет — проигрыш.</div>
+      </section>
+
+      <!-- Withdraw Page -->
+      <section id="withdraw" class="page card">
+        <h2>Вывод средств</h2>
+        <p class="muted">Выбери способ вывода.</p>
+        <div style="margin-top:8px">
+          <label><input type="radio" name="wmethod" value="card" checked> На карту</label>
+          <label style="margin-left:8px"><input type="radio" name="wmethod" value="qiwi"> Qiwi</label>
+          <label style="margin-left:8px"><input type="radio" name="wmethod" value="crypto"> Crypto</label>
+        </div>
+        <div id="withdrawFields" style="margin-top:10px">
+          <input id="wd-card" class="fake-input" placeholder="Номер карты">
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <input id="wd-exp" class="fake-input" placeholder="MM/YY">
+            <input id="wd-cvv" class="fake-input" placeholder="CVV">
+          </div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
+          <button id="wd-cancel">Отмена</button>
+          <button id="wd-confirm">Подтвердить</button>
+        </div>
+      </section>
+
+    </main>
+    <footer>Сделано для тебя)</footer>
+  </div>
+
+<script>
+// utils
+function $(id){return document.getElementById(id);} // must be first so other init code can use it
+
+// ---------------- Navigation ----------------
+const pages = document.querySelectorAll('.page');
+const navBtns = document.querySelectorAll('.nav-btn');
+function go(pageId){ pages.forEach(p=>p.classList.toggle('active', p.id===pageId)); navBtns.forEach(b=>b.classList.toggle('active', b.dataset.page===pageId)); window.location.hash = pageId; }
+navBtns.forEach(b=>b.addEventListener('click', ()=>go(b.dataset.page)));
+// init from hash
+if(location.hash){ const h = location.hash.replace('#',''); if(document.getElementById(h)) go(h); }
+
+// ---------------- Balance ----------------
+const balanceEl = $('balance'); let balance = parseFloat(localStorage.getItem('mini_balance') || '1000'); function setBalance(){ balanceEl.textContent = balance.toFixed(2); }
+function changeBalance(delta){ balance = Math.max(0, +(balance + delta).toFixed(2)); localStorage.setItem('mini_balance', balance); setBalance(); }
+setBalance();
+
+// ---------------- Shared audio ----------------
+const AudioCtx = window.AudioContext || window.webkitAudioContext; const audio = new (AudioCtx)(); let soundEnabled = true;
+function beep(freq,time=0.06,vol=0.14){ if(!soundEnabled) return; const o=audio.createOscillator(); const g=audio.createGain(); o.type='sine'; o.frequency.value=freq; g.gain.value=vol; o.connect(g); g.connect(audio.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.001,audio.currentTime+time); o.stop(audio.currentTime+time); }
+function playStart(){ beep(420,0.12,0.22); setTimeout(()=>beep(660,0.08,0.14),120); }
+function playTick(){ beep(860,0.03,0.055); }
+function playCrash(){ const o=audio.createOscillator(); const g=audio.createGain(); o.type='sawtooth'; o.frequency.value=100; g.gain.value=0.34; o.connect(g); g.connect(audio.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.001,audio.currentTime+0.8); o.stop(audio.currentTime+0.8); }
+function playWin(){ beep(920,0.06,0.16); setTimeout(()=>beep(1160,0.06,0.12),80); }
+
+// ---------------- Aviator (reuse realistic engine) ----------------
+const aviCanvas = $('aviCanvas'); const aviCtx = aviCanvas.getContext('2d'); function resizeCanvas(c){ const ratio = window.devicePixelRatio||1; c.width = Math.floor(c.clientWidth*ratio); c.height = Math.floor(c.clientHeight*ratio); const ctx = c.getContext('2d'); ctx.setTransform(ratio,0,0,ratio,0,0); }
+window.addEventListener('resize', ()=>resizeCanvas(aviCanvas)); function fitAvi(){ aviCanvas.style.height='260px'; aviCanvas.style.width='100%'; resizeCanvas(aviCanvas); } fitAvi();
+const visualMappingMultiplier = 20;
+let avi = {running:false,mult:1,crashPoint:1,bet:0,startTime:0,stoppedAtEdge:false};
+const aviHistory = $('avi-history');
+function secureRandom(){ const arr=new Uint32Array(2); crypto.getRandomValues(arr); const a=arr[0]&0x001fffff; const b=arr[1]>>>0; return (a*0x100000000+b)/0x20000000000000; }
+function genCrashPoint(){ const r=secureRandom(); const lambda=0.08; return parseFloat((1 + (-Math.log(1-r)/lambda)).toFixed(4)); }
+function growthStep(mult,dt){ let rate; if(mult<2) rate=0.22; else if(mult<10) rate=0.45; else if(mult<50) rate=0.9; else rate=1.6; const jitter=(Math.sin(mult*3.1415)*0.02+(secureRandom()-0.5)*0.02); rate=Math.max(0.02,rate+jitter); return mult*Math.exp(rate*dt); }
+class Smoke{ constructor(x,y){ this.x=x; this.y=y; this.life=1; this.size=8+Math.random()*10; this.vx=-0.6+Math.random()*-0.8; this.vy=-0.2+Math.random()*-0.6;} update(dt){ this.x+=this.vx*dt*60; this.y+=this.vy*dt*60; this.life-=0.02*dt*60;} draw(ctx){ ctx.save(); ctx.globalAlpha=Math.max(0,this.life*0.9); ctx.fillStyle='rgba(200,200,230,0.12)'; ctx.beginPath(); ctx.ellipse(this.x,this.y,this.size*this.life,this.size*this.life*0.6,0,0,Math.PI*2); ctx.fill(); ctx.restore(); }}
+let particles=[]; function drawAviBackground(ctx){ const w=aviCanvas.clientWidth; const h=aviCanvas.clientHeight; const t=(performance.now()/3000)%1; const grd=ctx.createLinearGradient(0,0,0,h); grd.addColorStop(0,`rgba(10,6,30,${0.8+0.05*Math.sin(t*6)})`); grd.addColorStop(0.5,`rgba(15,10,40,0.6)`); grd.addColorStop(1,`rgba(4,10,30,1)`); ctx.fillStyle=grd; ctx.fillRect(0,0,w,h); ctx.save(); ctx.globalAlpha=0.12; for(let i=0;i<6;i++){ const y=(i*70+(t*140))%(h+80)-40; ctx.fillStyle=`rgba(124,77,255,${0.05+i*0.02})`; ctx.fillRect(0,y,w,6);} ctx.restore(); }
+function drawPlane(ctx,x,y,angle,stopped){ ctx.save(); ctx.translate(x,y); ctx.rotate(angle); ctx.scale(1,1); if(stopped){ ctx.shadowColor='rgba(124,77,255,0.8)'; ctx.shadowBlur=22;} ctx.fillStyle='rgba(124,77,255,1)'; ctx.beginPath(); ctx.moveTo(-40,0); ctx.quadraticCurveTo(-10,-18,40,0); ctx.quadraticCurveTo(-10,18,-40,0); ctx.fill(); ctx.fillStyle='rgba(0,229,255,0.95)'; ctx.beginPath(); ctx.moveTo(-40,0); ctx.lineTo(-60,-8); ctx.lineTo(-60,8); ctx.closePath(); ctx.fill(); ctx.fillStyle='rgba(6,8,20,0.95)'; ctx.beginPath(); ctx.ellipse(10,-3,8,5,0,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+let lastFrame = performance.now(); function aviLoop(now){ const dt = (now-lastFrame)/1000; lastFrame=now; if(avi.running) avi.mult=growthStep(avi.mult,dt); drawAviBackground(aviCtx); const logNow=Math.log(Math.max(1,avi.mult)); const logDisplayMax=Math.log(Math.max(visualMappingMultiplier,1.000001)); let progress=Math.min(1,logNow/logDisplayMax); const pad=80; const w=aviCanvas.clientWidth; let x=pad+progress*(w-pad*2); if(x>w-pad) x=w-pad; const y=aviCanvas.clientHeight*0.45-Math.sin(progress*Math.PI*2)*16; if(avi.running||avi.stoppedAtEdge){ if(Math.random()<0.65) particles.push(new Smoke(x-20,y+6)); } for(let i=particles.length-1;i>=0;i--){ particles[i].update(dt); if(particles[i].life<=0) particles.splice(i,1);} for(const p of particles) p.draw(aviCtx); const atEdge=(x>=(w-pad-1)); if(atEdge && !avi.stoppedAtEdge){ avi.stoppedAtEdge=true; } drawPlane(aviCtx,x,y,Math.min(0.25,progress*0.35),avi.stoppedAtEdge); aviCtx.fillStyle='#bcdcff'; aviCtx.font='14px monospace'; aviCtx.fillText('×'+avi.mult.toFixed(2),12,20); if(avi.running && Math.random()<0.02) playTick(); if(avi.running && avi.mult>=avi.crashPoint){ avi.running=false; $('avi-cash').disabled=true; $('avi-start').disabled=false; logAvi(`💥 Краш на ${avi.crashPoint.toFixed(2)}x — ставка ${avi.bet} → проигрыш`); playCrash(); flashCrash(x,y);} if(avi.running) requestAnimationFrame(aviLoop);} function flashCrash(cx,cy){ const orig=aviCanvas.style.boxShadow; aviCanvas.style.boxShadow='0 0 120px rgba(255,60,60,0.9)'; setTimeout(()=>aviCanvas.style.boxShadow=orig,700); for(let i=0;i<60;i++){ const p=new Smoke(cx,cy); p.vx=-6+Math.random()*12; p.vy=-6+Math.random()*6; p.size=6+Math.random()*12; p.life=1; particles.push(p);} }
+function startAvi(){ if(avi.running) return; const bet=parseFloat($('avi-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} avi.bet=bet; changeBalance(-bet); avi.crashPoint=genCrashPoint(); avi.mult=1.00; avi.startTime=performance.now(); avi.running=true; avi.stoppedAtEdge=false; $('avi-start').disabled=true; $('avi-cash').disabled=false; playStart(); lastFrame=performance.now(); requestAnimationFrame(aviLoop); logAvi(`▶ Старт: ставка ${bet} — (target hidden)`);} function cashoutAvi(){ if(!avi.running) return; avi.running=false; const won=+(avi.bet*avi.mult).toFixed(2); changeBalance(won); $('avi-cash').disabled=true; $('avi-start').disabled=false; logAvi(`✅ Забрал ${avi.mult.toFixed(2)}x — ставка ${avi.bet} → выигрыш ${won}`); playWin(); for(let i=0;i<16;i++){ const p=new Smoke(aviCanvas.clientWidth*0.6,aviCanvas.clientHeight*0.45); p.vx=-2+Math.random()*4; p.vy=-4+Math.random()*2; p.size=6+Math.random()*6; p.life=1; particles.push(p);} }
+function logAvi(text){ const el=document.createElement('div'); el.textContent='['+new Date().toLocaleTimeString()+'] '+text; aviHistory.prepend(el); if(aviHistory.childElementCount>80) aviHistory.removeChild(aviHistory.lastChild); $('aviator-mult').textContent=avi.mult.toFixed(2)+'x'; }
+$('avi-start').addEventListener('click', startAvi); $('avi-cash').addEventListener('click', cashoutAvi);
+
+// ---------------- Mines (page separated) ----------------
+let minesGame={running:false,size:36,mines:5,bet:0,safeOpened:0,mult:1,grid:[],mineMap:[]}; const minesGridEl=$('minesGrid'); function setMinesControls(running){ $('min-start').disabled=running; $('min-cash').disabled=!running; } function createMines(){ const size=parseInt($('min-size').value,10); minesGame.size=size; const side=Math.round(Math.sqrt(size)); const minesCount=parseInt($('min-mines').value,10); minesGame.mines=minesCount; minesGridEl.style.gridTemplateColumns=`repeat(${side},44px)`; minesGridEl.innerHTML=''; minesGame.grid=[]; minesGame.mineMap=Array(size).fill(false); let placed=0; while(placed<minesCount){ const idx=Math.floor(secureRandom()*size); if(!minesGame.mineMap[idx]){ minesGame.mineMap[idx]=true; placed++; }} for(let i=0;i<size;i++){ const cell=document.createElement('div'); cell.className='cell'; cell.dataset.idx=i; cell.addEventListener('click',()=>onCellClick(cell,i)); minesGridEl.appendChild(cell); minesGame.grid.push(cell);} $('min-state').textContent='игра идет'; minesGame.running=true; minesGame.safeOpened=0; minesGame.mult=1.00; $('min-mult').textContent=minesGame.mult.toFixed(2)+'x'; setMinesControls(true);} function startMines(){ const bet=parseFloat($('min-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} changeBalance(-bet); minesGame.bet=bet; createMines(); playStart(); } function onCellClick(el,idx){ if(!minesGame.running||el.classList.contains('revealed')) return; el.classList.add('revealed'); if(minesGame.mineMap[idx]){ el.textContent='💣'; minesGame.running=false; $('min-state').textContent='взорвался'; setMinesControls(false); playCrash(); minesGame.grid.forEach((c,i)=>{ if(minesGame.mineMap[i]) c.textContent='💣'; }); } else { el.textContent='✓'; minesGame.safeOpened++; const safeTotal=minesGame.size-minesGame.mines; minesGame.mult=1+(minesGame.safeOpened/safeTotal)*6; $('min-mult').textContent=minesGame.mult.toFixed(2)+'x'; playTick(); }} function cashoutMines(){ if(!minesGame.running) return; minesGame.running=false; const won=+(minesGame.bet*minesGame.mult).toFixed(2); changeBalance(won); $('min-state').textContent='забрал'; setMinesControls(false); minesGame.grid.forEach((c,i)=>{ c.classList.add('revealed'); if(minesGame.mineMap[i]) c.textContent='💣'; if(!minesGame.mineMap[i]&&!c.textContent) c.textContent='✓'; }); playWin(); } $('min-start').addEventListener('click',startMines); $('min-cash').addEventListener('click',cashoutMines);
+(function initMines(){ const size=parseInt($('min-size').value,10); const side=Math.round(Math.sqrt(size)); minesGridEl.style.gridTemplateColumns=`repeat(${side},44px)`; minesGridEl.innerHTML=''; for(let i=0;i<size;i++){ const cell=document.createElement('div'); cell.className='cell'; cell.textContent=''; minesGridEl.appendChild(cell);} setMinesControls(false); })();
+
+// ---------------- Plinko (simple physics-ish) ----------------
+const plinkoCanvas = $('plinkoCanvas'); const pCtx = plinkoCanvas.getContext('2d'); function fitPlinko(){ plinkoCanvas.style.height='420px'; plinkoCanvas.style.width='100%'; const ratio=window.devicePixelRatio||1; plinkoCanvas.width=Math.floor(plinkoCanvas.clientWidth*ratio); plinkoCanvas.height=Math.floor(plinkoCanvas.clientHeight*ratio); pCtx.setTransform(ratio,0,0,ratio,0,0); } fitPlinko(); window.addEventListener('resize', ()=>fitPlinko());
+let plinko = {dropping:false,ball:{x:0,y:0,vx:0,vy:0},pegs:[],slots:8};
+function setupPlinko(){ plinko.pegs = []; const cols = 9; const rows = 7; const w = plinkoCanvas.clientWidth; const h = plinkoCanvas.clientHeight; for(let r=0;r<rows;r++){ for(let c=0;c<cols;c++){ const offset = (r%2)*25; const x = 40 + c*( (w-80)/(cols-1) ) + offset; const y = 60 + r*45; plinko.pegs.push({x,y}); } } plinko.slots = 8; drawPlinko(); }
+function drawPlinko(){ pCtx.clearRect(0,0,plinkoCanvas.clientWidth,plinkoCanvas.clientHeight); // background
+  pCtx.fillStyle='rgba(255,255,255,0.03)'; pCtx.fillRect(0,0,plinkoCanvas.clientWidth,plinkoCanvas.clientHeight);
+  // pegs
+  pCtx.fillStyle='rgba(124,77,255,0.9)'; for(const peg of plinko.pegs){ pCtx.beginPath(); pCtx.arc(peg.x,peg.y,6,0,Math.PI*2); pCtx.fill(); }
+  // slots
+  const slotW = (plinkoCanvas.clientWidth-80)/plinko.slots; for(let i=0;i<plinko.slots;i++){ pCtx.fillStyle='rgba(0,0,0,0.4)'; pCtx.fillRect(40+i*slotW, plinkoCanvas.clientHeight-40, slotW-6, 40); pCtx.fillStyle='rgba(200,200,255,0.08)'; pCtx.fillText((i+1), 40+i*slotW+slotW/2, plinkoCanvas.clientHeight-16); }
+  // ball
+  if(plinko.dropping){ pCtx.fillStyle='rgba(255,200,90,0.95)'; pCtx.beginPath(); pCtx.arc(plinko.ball.x, plinko.ball.y, 10,0,Math.PI*2); pCtx.fill(); }
+}
+function dropPlinko(){ if(plinko.dropping) return; const bet=parseFloat($('plinko-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} changeBalance(-bet); plinko.dropping=true; plinko.ball.x = plinkoCanvas.clientWidth/2; plinko.ball.y = 20; plinko.ball.vx = (secureRandom()-0.5)*4; plinko.ball.vy = 0; animatePlinko(); playStart(); }
+function animatePlinko(){ const gravity = 0.3; function step(){ if(!plinko.dropping) return; plinko.ball.vy += gravity; plinko.ball.x += plinko.ball.vx; plinko.ball.y += plinko.ball.vy; // collisions with pegs
+  for(const peg of plinko.pegs){ const dx = plinko.ball.x-peg.x; const dy = plinko.ball.y-peg.y; const dist = Math.sqrt(dx*dx+dy*dy); if(dist < 16){ plinko.ball.vx += (dx/dist)*2; plinko.ball.vy += (dy/dist)*2; } }
+  // boundaries
+  if(plinko.ball.x < 20) plinko.ball.x = 20, plinko.ball.vx *= -0.6; if(plinko.ball.x > plinkoCanvas.clientWidth-20) plinko.ball.x = plinkoCanvas.clientWidth-20, plinko.ball.vx *= -0.6;
+  if(plinko.ball.y > plinkoCanvas.clientHeight-60){ // landed
+    plinko.dropping=false; const slotW = (plinkoCanvas.clientWidth-80)/plinko.slots; const idx = Math.min(plinko.slots-1, Math.floor((plinko.ball.x-40)/slotW)); // multiplier by slot position
+    const mult = 1 + idx*0.8; const bet = parseFloat($('plinko-bet').value); const won = +(bet*mult).toFixed(2); changeBalance(won); playWin(); alert('Вы попали в слот '+(idx+1)+', множитель '+mult.toFixed(2)+'x — выигрыш '+won+' ₸'); drawPlinko(); return; }
+  drawPlinko(); requestAnimationFrame(step); } requestAnimationFrame(step); }
+$('plinko-drop').addEventListener('click', ()=>{ dropPlinko(); }); setupPlinko();
+
+// ---------------- Balloon ----------------
+const ballCanvas = $('balloonCanvas'); const bCtx = ballCanvas.getContext('2d'); let balloon = {running:false,pressure:0,burstAt:0,bet:0}; function drawBalloon(){ bCtx.clearRect(0,0,ballCanvas.width,ballCanvas.height); bCtx.fillStyle='rgba(10,10,30,0.6)'; bCtx.fillRect(0,0,ballCanvas.width,ballCanvas.height); // center
+  const cx = ballCanvas.width/2; const cy = ballCanvas.height*0.6; const r = 20 + balloon.pressure*18; bCtx.beginPath(); bCtx.fillStyle='rgba(255,80,140,0.95)'; bCtx.ellipse(cx,cy,Math.abs(r), r, 0,0,Math.PI*2); bCtx.fill(); bCtx.fillStyle='#fff'; bCtx.font='16px monospace'; bCtx.fillText('x'+(1+balloon.pressure*3).toFixed(2), cx-20, 40); }
+function startBalloon(){ if(balloon.running) return; const bet=parseFloat($('ball-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} balloon.bet=bet; changeBalance(-bet); balloon.running=true; balloon.pressure=0; balloon.burstAt = 0.5 + secureRandom()*5; $('ball-start').disabled=true; $('ball-pump').disabled=false; $('ball-cash').disabled=false; playStart(); drawBalloon(); }
+function pumpBalloon(){ if(!balloon.running) return; balloon.pressure += 0.12 + secureRandom()*0.12; drawBalloon(); if(balloon.pressure >= balloon.burstAt){ // burst
+  balloon.running=false; $('ball-start').disabled=false; $('ball-pump').disabled=true; $('ball-cash').disabled=true; playCrash(); alert('Шарик лопнул — ты проиграл'); drawBalloon(); } }
+function cashoutBalloon(){ if(!balloon.running) return; balloon.running=false; const mult = 1 + balloon.pressure*3; const won = +(balloon.bet * mult).toFixed(2); changeBalance(won); $('ball-start').disabled=false; $('ball-pump').disabled=true; $('ball-cash').disabled=true; playWin(); alert('Забрал '+mult.toFixed(2)+'x — выигрыш '+won+' ₸'); }
+$('ball-start').addEventListener('click', startBalloon); $('ball-pump').addEventListener('click', pumpBalloon); $('ball-cash').addEventListener('click', cashoutBalloon);
+
+// ---------------- Withdraw Page (prank) ----------------
+function updateWithdrawFields(){ const method = document.querySelector('input[name="wmethod"]:checked').value; const container=$('withdrawFields'); if(method==='card'){ container.innerHTML = `<input id="wd-card" class="fake-input" placeholder="Номер карты"><div style="display:flex;gap:8px;margin-top:8px"><input id="wd-exp" class="fake-input" placeholder="MM/YY"><input id="wd-cvv" class="fake-input" placeholder="CVV"></div><div class="small" style="margin-top:8px">Вывод средств занимают 2-3 дня</div>`; } else if(method==='qiwi'){ container.innerHTML = `<input id="wd-qiwi" class="fake-input" placeholder="Номер телефона (7...)"><div class="small" style="margin-top:8px">Вывод средств занимают 2-3 дня</div>`; } else { container.innerHTML = `<input id="wd-addr" class="fake-input" placeholder="Адрес кошелька"><div class="small" style="margin-top:8px">Вывод средств занимают 2-3 дня</div>`; } }
+document.querySelectorAll('input[name="wmethod"]').forEach(r=>r.addEventListener('change', updateWithdrawFields));
+$('wd-cancel').addEventListener('click', ()=>{ go('home'); });
+$('wd-confirm').addEventListener('click', ()=>{ const container=$('withdrawFields'); container.innerHTML = `<div style="padding:12px;border-radius:8px;background:rgba(255,255,255,0.02)">💀 <strong>Спасибо, вы повелись)</strong></div>`; setTimeout(()=>{ go('home'); updateWithdrawFields(); },1400); });
+
+</script>
+</body>
+</html>
