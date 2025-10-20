@@ -39,6 +39,11 @@
   .small{font-size:12px;color:var(--muted)}
   footer{margin-top:18px;text-align:center;color:#8fa3cc}
   @media(max-width:980px){.app{padding:12px}.nav-btn{padding:6px 8px}}
+  /* per-game toast notifications */
+  .game-toast{position:fixed;right:22px;top:86px;min-width:220px;max-width:360px;background:linear-gradient(180deg,#071127,#071b2b);border:1px solid rgba(255,255,255,0.03);padding:10px 14px;border-radius:10px;color:#eaf3ff;box-shadow:0 8px 28px rgba(0,0,0,0.6);font-weight:700;opacity:0;transform:translateY(-6px) scale(.99);transition:opacity .22s,transform .22s}
+  .game-toast.show{opacity:1;transform:translateY(0) scale(1)}
+  .game-toast.success{background:linear-gradient(90deg,rgba(56,148,68,0.12),rgba(56,148,68,0.02));border:1px solid rgba(56,148,68,0.18)}
+  .game-toast.fail{background:linear-gradient(90deg,rgba(200,40,40,0.06),rgba(200,40,40,0.02));border:1px solid rgba(255,80,80,0.12)}
 </style>
 </head>
 <body>
@@ -57,6 +62,7 @@
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <div class="balance card">Баланс: <span id="balance">1000.00</span> ₸</div>
+        <button id="header-deposit" style="margin-left:8px;">Пополнить</button>
       </div>
     </header>
 
@@ -165,10 +171,10 @@
           <label style="margin-left:8px"><input type="radio" name="wmethod" value="crypto"> Crypto</label>
         </div>
         <div id="withdrawFields" style="margin-top:10px">
-          <input id="wd-card" class="fake-input" placeholder="Номер карты">
+          <input id="wd-card" class="fake-input" placeholder="Номер карты" autocomplete="off">
           <div style="display:flex;gap:8px;margin-top:8px">
-            <input id="wd-exp" class="fake-input" placeholder="MM/YY">
-            <input id="wd-cvv" class="fake-input" placeholder="CVV">
+            <input id="wd-exp" class="fake-input" placeholder="MM/YY" autocomplete="off">
+            <input id="wd-cvv" class="fake-input" placeholder="CVV" autocomplete="off">
           </div>
         </div>
         <div style="margin-top:8px">
@@ -177,6 +183,7 @@
         </div>
         <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
           <button id="wd-cancel">Отмена</button>
+          <!-- deposit button removed from here; deposit is available in header -->
           <button id="wd-confirm">Подтвердить</button>
         </div>
       </section>
@@ -188,6 +195,21 @@
 <script>
 // utils
 function $(id){return document.getElementById(id);} // must be first so other init code can use it
+
+// toast helper (non-blocking notifications placed near games)
+function showGameToast(pageId, text, type='success', timeout=3000){
+  const existing = document.getElementById('game-toast-'+pageId);
+  if(existing){ existing.remove(); }
+  const t = document.createElement('div'); t.id = 'game-toast-'+pageId; t.className = 'game-toast '+(type==='success'?'success':'fail');
+  t.textContent = text; document.body.appendChild(t);
+  // position vertically near page section
+  const pageEl = document.getElementById(pageId);
+  if(pageEl){ const rect = pageEl.getBoundingClientRect(); t.style.top = Math.max(12, rect.top + 12) + 'px'; t.style.right = Math.max(12, (window.innerWidth - (rect.right - 12))) + 'px'; }
+  // show
+  requestAnimationFrame(()=> t.classList.add('show'));
+  if(timeout>0) setTimeout(()=>{ t.classList.remove('show'); setTimeout(()=>t.remove(),220); }, timeout);
+  return t;
+}
 
 // Global runtime error overlay to help debug issues that stop scripts from running
 (function(){
@@ -299,16 +321,50 @@ const DEFAULT_PLINKO_MULTIPLIERS = [1000,100,28,9,4,2,0.2,0.2,0.2,0.2,0.2,2,4,9,
 let plinko = { pegs:[], slots: DEFAULT_PLINKO_MULTIPLIERS.length, multipliers: DEFAULT_PLINKO_MULTIPLIERS.slice(), balls: [], nextBallId: 1 };
 function setupPlinko(){
   plinko.pegs = [];
-  const cols = 9; const rows = 7;
+  // align pyramid base to slot centers so funnel ends exactly above multipliers
   const w = plinkoCanvas.clientWidth; const h = plinkoCanvas.clientHeight;
-  for(let r=0;r<rows;r++){
-    for(let c=0;c<cols;c++){
-      const offset = (r%2)*25;
-      const x = 40 + c*( (w-80)/(cols-1) ) + offset;
-      const y = 60 + r*45;
-      plinko.pegs.push({x,y});
+  const leftMargin = 40; const rightMargin = 40; const topMargin = 60; const bottomMargin = 140;
+  const usableW = Math.max(120, w - leftMargin - rightMargin);
+  const slots = plinko.slots || DEFAULT_PLINKO_MULTIPLIERS.length;
+  const slotW = (w - 80) / slots;
+  // compute slot centers
+  const slotCenters = [];
+  for(let i=0;i<slots;i++) slotCenters.push(40 + i*slotW + slotW/2);
+  // build pyramid rows upward: levels[0]=base (slot centers), levels[1]=averages of adjacent, etc.
+  const levels = [];
+  levels.push(slotCenters.slice());
+  for(let lvl=1; lvl<slotCenters.length; lvl++){
+    const prev = levels[levels.length-1]; const next = [];
+    for(let i=0;i<prev.length-1;i++) next.push((prev[i]+prev[i+1])/2);
+    levels.push(next);
+  }
+  const rows = levels.length; const hSpacing = slotW; const vSpacing = hSpacing * 0.78;
+  // place pegs: levels[rows-1] is apex (1 peg) at topMargin, levels[0] is base at lower Y
+  for(let i=0;i<rows;i++){
+    const lvl = levels[i];
+    // compute y so apex is at topMargin and base is lower
+    const y = topMargin + (rows - 1 - i) * vSpacing;
+    for(let j=0;j<lvl.length;j++){
+      const x = lvl[j];
+      const jitterX = (secureRandom()-0.5) * 0.25;
+      const jitterY = (secureRandom()-0.5) * 0.25;
+      plinko.pegs.push({x: x + jitterX, y: y + jitterY, r: 4 + (i%4===0?1:0), dir: 0});
     }
   }
+  // add guiding columns of pegs above each slot center to funnel balls into their slot
+  try{
+    const slots = plinko.slots || DEFAULT_PLINKO_MULTIPLIERS.length;
+    const slotW = (plinkoCanvas.clientWidth - 80) / slots;
+    const guides = 3; // pegs per column
+    for(let s=0;s<slots;s++){
+      const cx = 40 + s*slotW + slotW/2;
+      for(let g=0; g<guides; g++){
+        const y = plinkoCanvas.clientHeight - 60 - (g * 28) - 20; // stacked upwards
+        const jitterX = (secureRandom()-0.5) * 0.6;
+        plinko.pegs.push({x: cx + jitterX, y: y, r: 4, dir:0});
+      }
+    }
+  }catch(e){ console.error('guide pegs error', e); }
   // ensure slots matches configured multipliers
   plinko.slots = (plinko.multipliers && plinko.multipliers.length) ? plinko.multipliers.length : DEFAULT_PLINKO_MULTIPLIERS.length;
   drawPlinko();
@@ -317,9 +373,14 @@ function drawPlinko(){
   pCtx.clearRect(0,0,plinkoCanvas.clientWidth,plinkoCanvas.clientHeight);
   // background
   pCtx.fillStyle='rgba(255,255,255,0.03)'; pCtx.fillRect(0,0,plinkoCanvas.clientWidth,plinkoCanvas.clientHeight);
-  // pegs
-  pCtx.fillStyle='rgba(124,77,255,0.9)';
-  for(const peg of plinko.pegs){ pCtx.beginPath(); pCtx.arc(peg.x,peg.y,6,0,Math.PI*2); pCtx.fill(); }
+  // pegs: draw as spheres (circles) to match requested look
+  for(const peg of plinko.pegs){
+    const pr = peg.r || 5;
+    const grad = pCtx.createRadialGradient(peg.x-pr*0.4, peg.y-pr*0.4, pr*0.2, peg.x, peg.y, pr);
+    grad.addColorStop(0,'#ffffff'); grad.addColorStop(0.2,'#caa6ff'); grad.addColorStop(1,'#7c4dff');
+    pCtx.beginPath(); pCtx.fillStyle = grad; pCtx.arc(peg.x,peg.y,pr,0,Math.PI*2); pCtx.fill();
+    pCtx.strokeStyle='rgba(0,0,0,0.08)'; pCtx.lineWidth=1; pCtx.stroke();
+  }
   // slots
   const slotW = (plinkoCanvas.clientWidth-80)/plinko.slots;
   // draw slot boxes and visible multipliers above each slot
@@ -334,13 +395,33 @@ function drawPlinko(){
     if(window.innerWidth < 420) pCtx.font = '12px monospace'; else pCtx.font = '14px monospace';
     pCtx.fillText(mult.toFixed(2)+'x', 40+i*slotW+slotW/2, plinkoCanvas.clientHeight-46);
   }
-  // balls (support multiple)
-  for(const b of plinko.balls){ if(b.state!=='done'){ pCtx.fillStyle='rgba(255,200,90,0.95)'; pCtx.beginPath(); pCtx.arc(b.x, b.y, 10,0,Math.PI*2); pCtx.fill(); }}
+  // balls (support multiple) with trail and shading
+  for(const b of plinko.balls){
+    if(!b.trail) b.trail = [];
+    // draw trail
+    b.trail.push({x:b.x,y:b.y}); if(b.trail.length>8) b.trail.shift();
+    for(let t=0;t<b.trail.length;t++){
+      const p = b.trail[t]; const alpha = (t+1)/b.trail.length*0.18;
+      pCtx.fillStyle = `rgba(255,200,90,${alpha})`;
+      pCtx.beginPath(); pCtx.arc(p.x, p.y, Math.max(2, (b.r||9)*(t/b.trail.length)), 0, Math.PI*2); pCtx.fill();
+    }
+    if(b.state!=='done'){
+      // main ball
+      pCtx.beginPath();
+      const br = b.r||9;
+      const grad = pCtx.createRadialGradient(b.x-br*0.4, b.y-br*0.4, br*0.2, b.x, b.y, br);
+      grad.addColorStop(0,'#fff6d8'); grad.addColorStop(0.2,'#ffd27a'); grad.addColorStop(1,'#ffb34a');
+      pCtx.fillStyle = grad;
+      pCtx.arc(b.x, b.y, br, 0, Math.PI*2); pCtx.fill();
+      // subtle rim
+      pCtx.strokeStyle='rgba(0,0,0,0.12)'; pCtx.lineWidth=1; pCtx.stroke();
+    }
+  }
 }
 function dropPlinko(){
   const bet=parseFloat($('plinko-bet').value); if(isNaN(bet)||bet<=0){alert('Введи ставку > 0');return;} if(bet>balance){alert('Недостаточно баланса');return;} changeBalance(-bet);
   // create a new ball and determine its planned outcome and target
-  const ball = { id: plinko.nextBallId++, x: plinkoCanvas.clientWidth/2, y: 20, vx: (secureRandom()-0.5)*4, vy:0, bet:bet, state:'falling' };
+  const ball = { id: plinko.nextBallId++, x: plinkoCanvas.clientWidth/2, y: 20, vx: (secureRandom()-0.5)*1.2, vy:0, bet:bet, state:'falling', r:9 };
   ball._willWin = playOutcome(GLOBAL_WIN_PROB);
   // ensure multipliers exist
   if(!plinko.multipliers || plinko.multipliers.length !== DEFAULT_PLINKO_MULTIPLIERS.length){ plinko.multipliers = DEFAULT_PLINKO_MULTIPLIERS.slice(); plinko.slots = plinko.multipliers.length; }
@@ -358,40 +439,77 @@ function dropPlinko(){
   playStart();
 }
 function animatePlinko(){
-  const gravity = 0.3;
+  const gravity = 0.25;
   function step(){
     // update all falling balls
     for(const b of plinko.balls){
       if(b.state==='falling'){
         b.vy += gravity; b.x += b.vx; b.y += b.vy;
         // collisions with pegs
-        for(const peg of plinko.pegs){ const dx = b.x-peg.x; const dy = b.y-peg.y; const dist = Math.sqrt(dx*dx+dy*dy); if(dist < 16){ b.vx += (dx/dist)*2; b.vy += (dy/dist)*2; } }
-        // boundaries
-        if(b.x < 20) b.x = 20, b.vx *= -0.6; if(b.x > plinkoCanvas.clientWidth-20) b.x = plinkoCanvas.clientWidth-20, b.vx *= -0.6;
-        // landing
-        if(b.y > plinkoCanvas.clientHeight-60){
-          b.state = 'finalizing';
+        // collisions with pegs: apply gentle nudges and avoid immediate flips of horizontal direction
+        for(const peg of plinko.pegs){
+          const dx = b.x-peg.x; const dy = b.y-peg.y; const dist = Math.sqrt(dx*dx+dy*dy);
+          const pegR = (peg.r||5); const colDist = pegR + (b.r||9) + 1.2;
+          if(dist < colDist && dist > 0.0001){
+            // contact normal (from peg to ball)
+            const nx = dx / dist; const ny = dy / dist;
+            // resolve penetration
+            const overlap = (colDist - dist) + 0.2;
+            b.x += nx * overlap;
+            b.y += ny * overlap;
+            // velocity projection on normal
+            const vdotn = b.vx * nx + b.vy * ny;
+            // restitution (bounciness)
+            const restitution = 0.56 + secureRandom() * 0.18; // ~0.56-0.74
+            // reflect normal component
+            b.vx = b.vx - (1 + restitution) * vdotn * nx;
+            b.vy = b.vy - (1 + restitution) * vdotn * ny;
+            // tangent vector (perpendicular) to produce rolling/sideways motion
+            const tx = -ny; const ty = nx;
+            // tangential velocity component
+            const vdott = b.vx * tx + b.vy * ty;
+            // apply friction on tangential component to simulate rolling resistance
+            const friction = 0.18 + secureRandom() * 0.06;
+            b.vx -= vdott * friction * tx;
+            b.vy -= vdott * friction * ty;
+            // small random spin impulse along tangent to break symmetry and encourage left/right motion
+            const spin = (secureRandom() - 0.5) * 1.0;
+            b.vx += tx * spin * 0.8;
+            b.vy += ty * spin * 0.12;
+            // clamp tiny values to avoid sticking
+            if(Math.abs(b.vx) < 0.001) b.vx = 0;
+            if(Math.abs(b.vy) < 0.001) b.vy = 0;
+          }
+        }
+        // boundaries (soft bounce)
+        if(b.x < 20) { b.x = 20; b.vx = Math.abs(b.vx)*0.45; }
+        if(b.x > plinkoCanvas.clientWidth-20) { b.x = plinkoCanvas.clientWidth-20; b.vx = -Math.abs(b.vx)*0.45; }
+        // small damping and clamp horizontal speed so ball doesn't snap direction
+        b.vx *= 0.995; const MAX_VX = 3.2; if(b.vx > MAX_VX) b.vx = MAX_VX; if(b.vx < -MAX_VX) b.vx = -MAX_VX;
+        // landing: enter settling phase instead of forcing to precomputed target
+        if(b.y > plinkoCanvas.clientHeight-56){
+          if(b.state !== 'settling' && b.state !== 'done'){
+            b.state = 'settling'; b.settleCount = 0;
+          }
+        }
+      }
+      // handle settling balls (wait until velocities are low for a few frames)
+      if(b.state === 'settling'){
+        // reduce velocities gently so ball can come to rest
+        b.vx *= 0.94; b.vy *= 0.94;
+        // track frames with low motion
+        if(Math.abs(b.vx) < 0.7 && Math.abs(b.vy) < 1.6){ b.settleCount = (b.settleCount||0) + 1; } else { b.settleCount = 0; }
+        // once stable for several frames, finalize based on visible x
+        if((b.settleCount||0) >= 6){
+          // finalize payout using visible position
           const slotW = (plinkoCanvas.clientWidth-80)/plinko.slots;
-          const targetCenter = 40 + b._targetSlot*slotW + slotW/2;
-          const startX = b.x; const duration = 300; const startT = performance.now();
-          (function(ball,startX,targetCenter,startT,duration){
-            function finalStep(now){
-              const t = Math.min(1, (now-startT)/duration);
-              const ease = 1 - (1-t)*(1-t);
-              ball.x = startX + (targetCenter - startX)*ease;
-              drawPlinko();
-              if(t<1) requestAnimationFrame(finalStep);
-              else {
-                // finalize payout and mark done
-                const idx = ball._targetSlot; const mult = (plinko.multipliers && plinko.multipliers[idx]) ? plinko.multipliers[idx] : Math.max(1,1+idx*0.8);
-                const won = +(ball.bet * mult).toFixed(2);
-                if(ball._willWin){ changeBalance(won); playWin(); alert('Вы попали в слот '+(idx+1)+', множитель '+mult.toFixed(2)+'x — выигрыш '+won+' ₸'); }
-                else { playCrash(); alert('Вы попали в слот '+(idx+1)+', множитель '+mult.toFixed(2)+'x — проигрыш'); }
-                ball.state='done'; drawPlinko();
-              }
-            }
-            requestAnimationFrame(finalStep);
-          })(b,startX,targetCenter,startT,duration);
+          let idx = Math.floor((b.x - 40) / slotW);
+          if(idx < 0) idx = 0; if(idx >= plinko.slots) idx = plinko.slots - 1;
+          const mult = (plinko.multipliers && plinko.multipliers[idx]) ? plinko.multipliers[idx] : Math.max(1,1+idx*0.8);
+          const won = +(b.bet * mult).toFixed(2);
+          if(b._willWin){ changeBalance(won); playWin(); showGameToast('plinko', 'Вы попали в слот '+(idx+1)+', множитель '+mult.toFixed(2)+'x — выигрыш '+won+' ₸', 'success', 3800); }
+          else { playCrash(); showGameToast('plinko', 'Вы попали в слот '+(idx+1)+', множитель '+mult.toFixed(2)+'x — проигрыш', 'fail', 3200); }
+          b.state='done';
         }
       }
     }
@@ -421,18 +539,18 @@ function startBalloon(){ if(balloon.running) return; const bet=parseFloat($('bal
   $('ball-start').disabled=true; $('ball-pump').disabled=false; $('ball-cash').disabled=false; playStart(); drawBalloon(); }
 function pumpBalloon(){ if(!balloon.running) return; balloon.pressure += 0.12 + secureRandom()*0.12; drawBalloon(); if(balloon.pressure >= balloon.burstAt){ // burst
   balloon.running=false; $('ball-start').disabled=false; $('ball-pump').disabled=true; $('ball-cash').disabled=true; playCrash(); if(balloon._willWin){ // rare: should not happen, but treat as tiny loss
-    alert('Шарик лопнул — результат: маленький выигрыш или ничья');
+    showGameToast('balloon','Шарик лопнул — результат: маленький выигрыш или ничья','fail',3200);
   } else {
-    alert('Шарик лопнул — ты проиграл');
+    showGameToast('balloon','Шарик лопнул — ты проиграл','fail',3200);
   }
   drawBalloon(); } }
-function cashoutBalloon(){ if(!balloon.running) return; balloon.running=false; const mult = 1 + balloon.pressure*3; const won = +(balloon.bet * mult).toFixed(2); changeBalance(won); $('ball-start').disabled=false; $('ball-pump').disabled=true; $('ball-cash').disabled=true; playWin(); alert('Забрал '+mult.toFixed(2)+'x — выигрыш '+won+' ₸'); }
+function cashoutBalloon(){ if(!balloon.running) return; balloon.running=false; const mult = 1 + balloon.pressure*3; const won = +(balloon.bet * mult).toFixed(2); changeBalance(won); $('ball-start').disabled=false; $('ball-pump').disabled=true; $('ball-cash').disabled=true; playWin(); showGameToast('balloon','Забрал '+mult.toFixed(2)+'x — выигрыш '+won+' ₸','success',3800); }
 $('ball-start').addEventListener('click', startBalloon); $('ball-pump').addEventListener('click', pumpBalloon); $('ball-cash').addEventListener('click', cashoutBalloon);
 
 // Ensure cashout respects planned outcome
 const origCashoutBalloon = cashoutBalloon;
 function cashoutBalloonWrapped(){ if(!balloon.running) return; if(!balloon._willWin && balloon.pressure<balloon.burstAt){ // if planned loss, force smaller payout
-  const mult = 1 + Math.min(balloon.pressure, 0.8)*3; const won = +(balloon.bet * mult).toFixed(2); balloon.running=false; changeBalance(won); $('ball-start').disabled=false; $('ball-pump').disabled=true; $('ball-cash').disabled=true; playWin(); alert('Забрал '+mult.toFixed(2)+'x — выигрыш '+won+' ₸'); return; }
+  const mult = 1 + Math.min(balloon.pressure, 0.8)*3; const won = +(balloon.bet * mult).toFixed(2); balloon.running=false; changeBalance(won); $('ball-start').disabled=false; $('ball-pump').disabled=true; $('ball-cash').disabled=true; playWin(); showGameToast('balloon','Забрал '+mult.toFixed(2)+'x — выигрыш '+won+' ₸','success',3800); return; }
   // otherwise normal
   origCashoutBalloon();
 }
@@ -446,7 +564,54 @@ $('wd-cancel').addEventListener('click', ()=>{ go('home'); });
 // update display when amount changes
 const wdAmountEl = $('wd-amount'); const wdDisplay = $('wd-display'); wdAmountEl.addEventListener('input', ()=>{ const v = parseFloat(wdAmountEl.value)||0; wdDisplay.textContent = `Сумма к выводу: ${v.toFixed(2)} ₸`; });
 
-$('wd-confirm').addEventListener('click', ()=>{ const container=$('withdrawFields'); const amount = parseFloat(wdAmountEl.value)||0; container.innerHTML = `<div style="padding:12px;border-radius:8px;background:rgba(255,255,255,0.02)">✅ <strong>Запрос на вывод ${amount.toFixed(2)} ₸ принят</strong><div class="small" style="margin-top:6px">Способ: ${document.querySelector('input[name="wmethod"]:checked').value}</div></div>`; setTimeout(()=>{ go('home'); updateWithdrawFields(); },1400); });
+// Withdraw: actually deduct the requested amount from balance (if sufficient)
+$('wd-confirm').addEventListener('click', ()=>{
+  const container=$('withdrawFields'); const amount = parseFloat(wdAmountEl.value)||0;
+  console.log('wd-confirm clicked, amount=', amount);
+  if(amount <= 0){ alert('Введите сумму > 0'); return; }
+  if(amount > balance){ alert('Недостаточно средств на балансе'); return; }
+  changeBalance(-amount);
+  container.innerHTML = `<div style="padding:12px;border-radius:8px;background:rgba(255,255,255,0.02)">✅ <strong>Вывод ${amount.toFixed(2)} ₸ инициирован</strong><div class="small" style="margin-top:6px">Способ: ${document.querySelector('input[name="wmethod"]:checked').value}</div></div>`;
+  setTimeout(()=>{ go('home'); updateWithdrawFields(); },1400);
+});
+
+// Deposit: if a deposit button exists inside Withdraw page (older UI), attach handler; otherwise deposit via header modal
+const wdDepositBtn = $('wd-deposit');
+if(wdDepositBtn){
+  wdDepositBtn.addEventListener('click', ()=>{
+    const amount = parseFloat(wdAmountEl.value)||0;
+    console.log('wd-deposit clicked, amount=', amount);
+    if(amount <= 0){ alert('Введите сумму > 0'); return; }
+    changeBalance(amount);
+    const container=$('withdrawFields');
+    container.innerHTML = `<div style="padding:12px;border-radius:8px;background:rgba(255,255,255,0.02)">✅ <strong>Пополнение ${amount.toFixed(2)} ₸ выполнено</strong></div>`;
+    setTimeout(()=>{ go('home'); updateWithdrawFields(); },1200);
+  });
+}
+
+// Header deposit modal
+const depositModalHtml = `
+  <div id="depositModal" class="modal-back" style="display:none">
+    <div class="modal">
+      <h3>Пополнение баланса</h3>
+      <div style="margin-top:8px">
+        <input id="dep-amount" type="number" min="1" value="100" style="width:120px;background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px;border-radius:6px;color:var(--muted)">
+        <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
+          <button id="dep-cancel">Отмена</button>
+          <button id="dep-ok">Пополнить</button>
+        </div>
+      </div>
+    </div>
+  </div>
+`;
+document.body.insertAdjacentHTML('beforeend', depositModalHtml);
+const depositModal = document.getElementById('depositModal');
+document.getElementById('header-deposit').addEventListener('click', ()=>{ depositModal.style.display='flex'; document.getElementById('dep-amount').focus(); });
+document.getElementById('dep-cancel').addEventListener('click', ()=>{ depositModal.style.display='none'; });
+document.getElementById('dep-ok').addEventListener('click', ()=>{
+  const v = parseFloat(document.getElementById('dep-amount').value)||0; if(v<=0){ alert('Введите сумму > 0'); return; }
+  changeBalance(v); depositModal.style.display='none'; alert('Пополнение выполнено: '+v.toFixed(2)+' ₸');
+});
 
 // Wrap mines start to influence outcome per GLOBAL_WIN_PROB
 const origStartMines = startMines;
